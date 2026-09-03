@@ -69,8 +69,7 @@ fi
 case "$platform" in
   ''|both|auto) platform=$(bash "$SDLC_PLUGIN_ROOT/scripts/platform/_detect.sh") || sdlc_die 3 "cannot determine the platform: pass --platform github|azure" ;;
   none) sdlc_die 3 "not supported on this platform: 'none' means local artifacts only (no tracker, no PRs)" ;;
-  github|azure) ;;
-  *) sdlc_die 2 "unknown platform '$platform' (expected github or azure)" ;;
+  *) [ -d "$SDLC_PLUGIN_ROOT/scripts/platform/$platform" ] || sdlc_die 2 "unknown platform '$platform' (available: $(ls "$SDLC_PLUGIN_ROOT/scripts/platform" | grep -v '^_' | grep -v '\.' | paste -sd' '))" ;;
 esac
 
 if [ "${SDLC_PLATFORM_MOCK:-0}" = "1" ]; then

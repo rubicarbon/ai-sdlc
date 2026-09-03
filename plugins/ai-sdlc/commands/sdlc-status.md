@@ -1,11 +1,27 @@
 ---
-description: "Show whether this repo is an ai-sdlc project, its tier, config validity and the next stage."
+description: "Show the SDLC state of this repo: config validity, tier, platform, template drift, mattpocock-skills drift, stage readiness, active ticket, FIX_MODE and release authorisations."
 disable-model-invocation: true
-allowed-tools: Bash(test *), Bash(cat sdlc.config.json), Bash(jq *)
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/init/status.sh *), Bash(jq *)
 ---
 
-Report the SDLC state of the current repository.
+Report the SDLC state of the current repository from one script call; add no facts the JSON does not contain.
 
-1. Check for `sdlc.config.json` in the working directory. If it is missing, say so and point to `/ai-sdlc:sdlc-init`; stop.
-2. Print `platform`, `tier`, `team.mode` and `commands.verify` from the config in one line each.
-3. Name the next stage: read the router in the `ai-sdlc:sdlc-loop` skill and report which artifact is missing first.
+```
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/init/status.sh" --repo-dir .
+```
+
+When `initialised` is false, say the repo is not an ai-sdlc project and point to `/ai-sdlc:sdlc-init`; stop.
+
+Otherwise present, in this order:
+
+| Section | Fields | What to say |
+| --- | --- | --- |
+| Config | `config.valid`, `config.errors`, `platform`, `tier`, `team`, `verify` | one line per field; list every error verbatim |
+| Plugin version | `config.renderedBy` vs `config.pluginVersion`, `upgradeAvailable` | when they differ, recommend `/ai-sdlc:sdlc-upgrade` |
+| Drift | `drift.result` (`clean`, `drift`, `unknown`), `drift.pending[]` (`path`, `status` = `template-changed` or `missing`) | list each pending file; any `template-changed` entry also earns the `/ai-sdlc:sdlc-upgrade` pointer |
+| Inner loop | `mattpocock.installed`, `installed_version` vs `expected_version`, `missing`, `retyped`, `editable_copies`, `drift` | not installed: `/plugin install mattpocock-skills`; drift: the `ai-sdlc:sdlc-loop` routing table is stale, see `docs/REUSE.md` |
+| Stages | `stages.tickets|build|verify|ship` with `ready` and `reason` | a table: stage, ready, reason (the reason names the command that unblocks it) |
+| Work in flight | `activeTicket`, `fixMode`, `features[]`, `verifyReports` | active ticket id or none; FIX_MODE armed means test edits are denied by hook |
+| Releases | `releaseAuthorisations[]` (commit shas) | list them; each is valid only until the expiry inside the marker file |
+
+Close with the first stage whose `ready` is false and its `reason`: that is the next thing to do. Done when every section above has been printed.

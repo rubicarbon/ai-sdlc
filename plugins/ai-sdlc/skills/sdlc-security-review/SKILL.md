@@ -28,7 +28,7 @@ The list is short on purpose: these are the defects that recur in agent-written 
 Blocking: <n>  Important: <n>  Nit: <n> (cap <cap>)
 
 ## Blocking
-- `path/file.ext:123` — <check name>: <what is wrong>. Fix: <smallest change>.
+- `path/file.ext:123` (<check name>): <what is wrong>. Fix: <smallest change>.
 
 ## Important
 - ...
@@ -40,7 +40,7 @@ Blocking: <n>  Important: <n>  Nit: <n> (cap <cap>)
 | Package | Version | Justified in PR | Notes |
 
 ## Human-only areas touched
-- <file> — <adopted by a human: yes/no>
+- <file>: adopted by a human yes/no
 
 Findings are advisory; a human code owner approves the merge.
 ```

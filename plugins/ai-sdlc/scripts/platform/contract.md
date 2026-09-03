@@ -1,6 +1,6 @@
 # Platform adapter contract
 
-This is the normative interface between `ai-sdlc` and a code-hosting platform. Skills, commands, agents, CI templates and the Azure `docs/agents/issue-tracker.md` call **only** this contract, through the dispatcher `bin/sdlc-platform`, and never `gh`, `az` or `glab` directly. Adding a platform means adding one directory `scripts/platform/<platform>/` with one script per function and making `conformance.sh` pass; nothing else changes.
+This is the normative interface between `ai-sdlc` and a code-hosting platform. Skills, commands, agents, CI templates and the Azure `docs/agents/issue-tracker.md` call **only** this contract, through the dispatcher `bin/sdlc-platform`, and never `gh`, `az` or `glab` directly. Adding a platform means adding one directory `scripts/platform/<platform>/` with one script per function (eleven; `platform_detect` is shared in `scripts/platform/_detect.sh` and needs one new remote-URL pattern there), then making `conformance.sh` pass. The dispatcher accepts any platform that has a directory, so nothing else changes.
 
 ## Invocation
 
@@ -114,12 +114,12 @@ Normalised file:
   "reverts":[{"sha":"...","committed_at":"...","reverts_sha":"..."}]
 }
 ```
-Sources: GitHub uses merged PRs with reviews, the Deployments API (fallback: workflow runs of the configured deploy workflow), issues labelled per `metrics.incidentLabel`, and `git log --grep '^Revert'`. Azure uses completed PRs, PR threads for the first vote, runs of the configured deploy pipeline, a WIQL query for bugs, and the same git log. Dates are ISO 8601 UTC.
+Sources: GitHub uses merged PRs with reviews, the Deployments API (fallback: workflow runs of the configured deploy workflow), issues labelled per `metrics.incidentLabel`, and `git log --grep '^Revert'`. Azure uses completed PRs, PR threads for the first vote, runs of the configured deploy pipeline, a WIQL query for work items tagged with `metrics.incidentLabel`, and the same git log. Dates are ISO 8601 UTC.
 
 ## Common behaviour
 
 - `--dry-run` (or `SDLC_DRY_RUN=1`) prints the platform CLI command(s) that would run, one per line, to stdout and exits 0 without calling the platform.
-- `--mock` (or `SDLC_PLATFORM_MOCK=1`) prepends `scripts/platform/_mocks/bin` to `PATH`, where fake `gh` and `az` answer from `scripts/platform/_mocks/responses/` and log every invocation to `$SDLC_MOCK_LOG`. `conformance.sh` runs both adapters this way and diffs the normalised outputs.
+- `--mock` (or `SDLC_PLATFORM_MOCK=1`) prepends `scripts/platform/_mocks/bin` to `PATH`, where fake `gh` and `az` generate canned answers in code, keep ids and relations under `$SDLC_MOCK_STATE`, and log every invocation to `$SDLC_MOCK_LOG`. `conformance.sh` runs both adapters this way and diffs the normalised outputs.
 - Authentication is checked once per invocation (`gh auth status`; `az account show` and `az devops configure -l`), and a missing login is exit 1 with the platform's login command in the message.
 - Bodies are always passed as files, never inline, so Markdown with quotes and newlines survives.
 - Every adapter script sources `scripts/_root.sh`, `scripts/_lib.sh` and `scripts/platform/_common.sh`, in that order.

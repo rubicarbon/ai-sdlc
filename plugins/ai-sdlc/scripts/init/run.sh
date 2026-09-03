@@ -5,7 +5,7 @@
 #          [--verify CMD] [--format CMD] [--lint CMD] [--envs dev,staging,prod]
 #          [--owner O --name N] [--azure-org URL --azure-project P --azure-repo R]
 #          [--max-turns N --max-budget-usd X --alert-threshold-usd Y]
-#          [--yes] [--force] [--upgrade] [--check] [--dry-run]
+#          [--yes] [--force] [--upgrade] [--only <path>]... [--check] [--dry-run]
 #
 # First run: builds sdlc.config.json from detect.sh plus flags, validates it against the schema,
 # renders the files for the chosen tier and platform, merges permission rules into
@@ -25,10 +25,11 @@ RENDER="$SDLC_PLUGIN_ROOT/scripts/init/render.sh"
 
 dir="$PWD"; platform=""; tier=""; team=""; verify=""; format_cmd=""; lint_cmd=""; envs="dev,staging,prod"
 owner=""; name=""; az_org=""; az_project=""; az_repo=""; max_turns=""; max_budget=""; alert=""
-yes=0; force=0; upgrade=0; check=0; dry=0
+yes=0; force=0; upgrade=0; check=0; dry=0; only=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-dir) dir="$2"; shift 2 ;;
+    --only) only+=("${2//\\//}"); shift 2 ;;
     --platform) platform="$2"; shift 2 ;;
     --tier) tier="$2"; shift 2 ;;
     --team) team="$2"; shift 2 ;;
@@ -154,16 +155,18 @@ manage() {
     if [ "$cur_hash" = "$new_hash" ]; then add_status "$dest" unchanged "$tmpl"; rm -f "$tmp"
     elif [ -n "$rec_hash" ] && [ "$cur_hash" = "$rec_hash" ]; then
       # untouched by the user, but the plugin's template moved on
-      if [ $check = 0 ] && { [ $upgrade = 1 ] || [ $force = 1 ]; }; then place "$tmp" "$dest"; add_status "$dest" upgraded "$tmpl"
+      if [ $check = 0 ] && { [ $upgrade = 1 ] || [ $force = 1 ]; } && only_allows "$dest"; then place "$tmp" "$dest"; add_status "$dest" upgraded "$tmpl"
       else add_status "$dest" template-changed "$tmpl"; rm -f "$tmp"; fi
     else
-      if [ $check = 0 ] && [ $force = 1 ]; then place "$tmp" "$dest"; add_status "$dest" overwritten "$tmpl"
+      if [ $check = 0 ] && [ $force = 1 ] && only_allows "$dest"; then place "$tmp" "$dest"; add_status "$dest" overwritten "$tmpl"
       else add_status "$dest" user-edited "$tmpl"; rm -f "$tmp"; fi
     fi
   fi
   recorded=$(jq -c --arg d "$dest" --arg h "$new_hash" --arg t "$tmpl" '.[$d]={template:$t,sha256:$h}' <<<"$recorded")
 }
 place() { if [ $dry = 1 ]; then rm -f "$1"; return; fi; mkdir -p "$(dirname "$2")"; mv "$1" "$2"; writes=$((writes+1)); }
+# --only <path> (repeatable) limits --upgrade / --force to the listed managed files
+only_allows() { [ ${#only[@]} -eq 0 ] && return 0; local o; for o in "${only[@]}"; do [ "$o" = "$1" ] && return 0; done; return 1; }
 
 # create_once <template> <dest>: rendered on first run, then owned by the user (never compared)
 create_once() {
