@@ -1,0 +1,26 @@
+{
+  "name": "ai-sdlc-kit",
+  "owner": {
+    "name": "gergely.somogyvari",
+    "url": "https://github.com/gergely-somogyvari"
+  },
+  "description": "AI-native SDLC workspace for Claude Code: platform adapters (GitHub, Azure DevOps), deterministic guardrails, CI review, metrics and evals around the mattpocock-skills inner loop.",
+  "plugins": [
+    {
+      "name": "ai-sdlc",
+      "source": "./plugins/ai-sdlc",
+      "description": "Turns a project into an AI-native SDLC workspace: grill, spec, tickets, build, verify, ship, learn. Every stage commits an artifact; nothing merges without a human.",
+      "category": "engineering",
+      "keywords": [
+        "sdlc",
+        "azure-devops",
+        "github",
+        "hooks",
+        "guardrails",
+        "dora",
+        "metrics",
+        "ci"
+      ]
+    }
+  ]
+}
