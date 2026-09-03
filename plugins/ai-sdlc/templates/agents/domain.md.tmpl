@@ -1,0 +1,22 @@
+# Domain docs
+
+How agents consume this repository's domain documentation. Written by `/ai-sdlc:sdlc-init`; the layout matches what `mattpocock-skills:domain-modeling` maintains.
+
+## Before exploring, read
+
+- `CONTEXT.md` at the repository root: the glossary. Use its terms in code, tests, tickets and messages; the `_Avoid_` lists name the synonyms to drop.
+- `docs/adr/`: decisions that were hard to reverse and surprising without context. Read the ADRs that touch the area you are about to change.
+
+Missing files are not a problem to report; `domain-modeling` creates them lazily when the first term or decision is resolved during `/ai-sdlc:sdlc-start`.
+
+## Layout
+
+Single context: one `CONTEXT.md`, one `docs/adr/` directory with `NNNN-slug.md` files numbered from `0001`.
+
+## When your output contradicts an ADR
+
+Say so explicitly ("contradicts ADR-0003 because …") and let the human decide; a contradiction is either a bug in the change or a reason to write ADR-000N superseding the old one.
+
+## Verification vocabulary for {{PROJECT_NAME}}
+
+`{{COMMANDS_VERIFY}}` is **the verify command**. A ticket is **accepted** when its `Status:` is `ready-for-agent`; it is **active** when its id is in `{{ARTIFACTS_DIR}}/ACTIVE_TICKET`; a release is **authorised** when `{{ARTIFACTS_DIR}}/release/AUTHORIZED-<sha>` exists for the commit being shipped.

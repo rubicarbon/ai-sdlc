@@ -51,6 +51,14 @@ sdlc_python() {
   return 1
 }
 
+# sdlc_sha256 <file> -> hex digest (sha256sum on Linux/Git Bash, shasum on macOS, openssl as fallback)
+sdlc_sha256() {
+  if sdlc_has sha256sum; then sha256sum "$1" | cut -d' ' -f1
+  elif sdlc_has shasum; then shasum -a 256 "$1" | cut -d' ' -f1
+  elif sdlc_has openssl; then openssl dgst -sha256 "$1" | sed 's/^.*= //'
+  else cksum "$1" | cut -d' ' -f1; fi
+}
+
 sdlc_iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 sdlc_today()   { date -u +%Y-%m-%d; }
 
