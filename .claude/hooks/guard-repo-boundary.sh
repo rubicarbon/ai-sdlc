@@ -63,8 +63,12 @@ if [ -e "$REPO_ROOT/.dev/BOUNDARY_HOOK_DISABLED" ]; then
 fi
 
 # Read stdin with a builtin (no `cat` spawn); one jq call extracts every field.
+# Fail closed: unparseable input denies the call instead of silently allowing it.
 IFS= read -r -d '' input || true
-eval "$(jq -r '@sh "tool=\(.tool_name // "") cwd=\(.cwd // "") fp=\(.tool_input.file_path // "") nb=\(.tool_input.notebook_path // "") gp=\(.tool_input.path // "") cmd=\(.tool_input.command // "")"' <<<"$input")"
+parsed=$(jq -r '@sh "tool=\(.tool_name // "") cwd=\(.cwd // "") fp=\(.tool_input.file_path // "") nb=\(.tool_input.notebook_path // "") gp=\(.tool_input.path // "") cmd=\(.tool_input.command // "")"' <<<"$input" 2>/dev/null) \
+  || deny "hook input is not valid JSON; refusing to guess"
+[ -n "$parsed" ] || deny "hook input is empty; refusing to guess"
+eval "$parsed"
 
 # realize <canon-path> -> R_REAL : resolve symlinks in the existing prefix.
 # Spawns realpath only if some existing component is a symlink.

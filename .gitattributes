@@ -1,0 +1,10 @@
+# Shell scripts, hooks and JSON must stay LF: Git Bash and CI runners execute them directly.
+* text=auto eol=lf
+*.sh text eol=lf
+*.jq text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.tmpl text eol=lf
+*.png binary

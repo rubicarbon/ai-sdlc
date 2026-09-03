@@ -84,6 +84,12 @@ run 0 Bash "$(j 'echo $(( (e - s) / 1000000 ))' '{command:$v}')"             'di
 run 0 Bash "$(j 'x=$((a / b))' '{command:$v}')"                              'division by identifier'
 run 2 Bash "$(j 'ls / ' '{command:$v}')"                                     'ls / (trailing space)'
 
+echo "== fail closed on bad input =="
+echo 'not json' | bash "$hook" >/dev/null 2>&1; got=$?
+if [ "$got" = 2 ]; then pass=$((pass+1)); echo "ok   2    malformed JSON input denies"; else fail=$((fail+1)); echo "FAIL want=2 got=$got malformed JSON input"; fi
+printf '' | bash "$hook" >/dev/null 2>&1; got=$?
+if [ "$got" = 2 ]; then pass=$((pass+1)); echo "ok   2    empty input denies"; else fail=$((fail+1)); echo "FAIL want=2 got=$got empty input"; fi
+
 echo "== timing =="
 # Process spawn is expensive under MSYS; report the hook relative to a bash+jq baseline.
 # Minimum of 5 runs filters antivirus / scheduler jitter.
