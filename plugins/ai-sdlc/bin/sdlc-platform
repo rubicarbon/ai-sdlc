@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# sdlc-platform — dispatcher for the platform adapter contract.
+#
+#   sdlc-platform [--platform github|azure] [--dry-run] <function> [args...]
+#   sdlc-platform --list | --help | --detect
+#
+# Resolves the platform (flag, $SDLC_PLATFORM, sdlc.config.json, git remote) and
+# execs scripts/platform/<platform>/<function>.sh. Skills, commands and agents
+# call this and never `gh` or `az` directly. See scripts/platform/contract.md.
+set -u
+here="${0%/*}"
+. "$here/../scripts/_root.sh" || exit 2
+. "$SDLC_PLUGIN_ROOT/scripts/_lib.sh"
+
+FUNCTIONS="platform_detect work_item_create work_item_get work_item_link work_item_comment pr_create pr_get pr_comment pr_checks branch_protect_apply ci_workflow_install metrics_export"
+
+usage() {
+  cat <<USAGE
+Usage: sdlc-platform [--platform github|azure] [--dry-run] <function> [args...]
+       sdlc-platform --list | --detect | --help
+
+Functions:
+  platform_detect                                      -> github | azure
+  work_item_create <title> <body-file> [--labels a,b] [--type T] [--parent ID]
+  work_item_get <id>
+  work_item_link <from-id> <to-id> --type blocks|parent|related
+  work_item_comment <id> <body-file>
+  pr_create <title> <body-file> <base> <head> [--draft]
+  pr_get <id>
+  pr_comment <id> <body-file>
+  pr_checks <id>                                       (exit 1 failing, 8 pending)
+  branch_protect_apply <branch>
+  ci_workflow_install
+  metrics_export <since> <until> <out.json>
+
+Exit codes: 0 ok, 1 failure, 2 usage, 3 not supported on this platform, 8 pending.
+Environment: SDLC_PLATFORM, SDLC_DRY_RUN=1, SDLC_PLATFORM_MOCK=1 (use bundled CLI mocks).
+USAGE
+}
+
+platform=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --platform) platform="${2:-}"; shift 2 ;;
+    --platform=*) platform="${1#*=}"; shift ;;
+    --dry-run) export SDLC_DRY_RUN=1; shift ;;
+    --mock) export SDLC_PLATFORM_MOCK=1; shift ;;
+    --list) echo "$FUNCTIONS" | tr ' ' '\n'; exit 0 ;;
+    --help|-h) usage; exit 0 ;;
+    --detect) exec bash "$SDLC_PLUGIN_ROOT/scripts/platform/_detect.sh" ;;
+    --*) sdlc_die 2 "unknown option '$1' (see sdlc-platform --help)" ;;
+    *) break ;;
+  esac
+done
+
+[ $# -ge 1 ] || { usage >&2; exit 2; }
+fn="$1"; shift
+case " $FUNCTIONS " in *" $fn "*) ;; *) sdlc_die 2 "unknown function '$fn' (see sdlc-platform --list)" ;; esac
+
+if [ "$fn" = "platform_detect" ]; then
+  exec bash "$SDLC_PLUGIN_ROOT/scripts/platform/_detect.sh" "$@"
+fi
+
+if [ -z "$platform" ]; then platform="${SDLC_PLATFORM:-}"; fi
+if [ -z "$platform" ]; then
+  SDLC_PROJECT_OPTIONAL=1 . "$SDLC_PLUGIN_ROOT/scripts/_project.sh"
+  if [ -n "${SDLC_CONFIG:-}" ]; then platform=$(sdlc_config '.platform' ''); fi
+fi
+case "$platform" in
+  ''|both|auto) platform=$(bash "$SDLC_PLUGIN_ROOT/scripts/platform/_detect.sh") || sdlc_die 3 "cannot determine the platform: pass --platform github|azure" ;;
+  none) sdlc_die 3 "not supported on this platform: 'none' means local artifacts only (no tracker, no PRs)" ;;
+  github|azure) ;;
+  *) sdlc_die 2 "unknown platform '$platform' (expected github or azure)" ;;
+esac
+
+if [ "${SDLC_PLATFORM_MOCK:-0}" = "1" ]; then
+  export PATH="$SDLC_PLUGIN_ROOT/scripts/platform/_mocks/bin:$PATH"
+fi
+
+impl="$SDLC_PLUGIN_ROOT/scripts/platform/$platform/$fn.sh"
+[ -f "$impl" ] || sdlc_die 3 "not supported on this platform: $platform has no implementation of $fn"
+export SDLC_PLATFORM="$platform"
+exec bash "$impl" "$@"

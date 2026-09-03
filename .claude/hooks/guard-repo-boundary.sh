@@ -207,6 +207,7 @@ while IFS= read -r seg; do
       nxt="${toks[$j]:-}"
       [[ "$nxt" =~ ^[A-Za-z0-9_.]+$ ]] && continue
     fi
+    [[ "$t" =~ ^\\[a-zA-Z0-9]$ ]] && continue         # escape sequences like \n \t \0 are not paths
     # path-like?
     if [[ "$t" == /* || "$t" == \\* || "$t" =~ ^[A-Za-z]:([/\\]|$) || "$t" == *[/\\]* || "$t" == '..' || "$t" == '.' ]]; then
       check_path "$t" "$vcwd" "path argument"

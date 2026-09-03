@@ -78,6 +78,8 @@ run 0 Bash "$(j 'grep -rn "TODO" --exclude-dir=templates .' '{command:$v}')" 'gr
 run 0 Bash "$(j 'node --version; python --version' '{command:$v}')"          'version checks'
 run 0 Bash "$(j 'printf "%s\n" a b | sort -u' '{command:$v}')"               'printf with %s (not %VAR%)'
 run 0 PowerShell "$(j 'Get-ChildItem .\plugins' '{command:$v}')"             'PS in-repo relative'
+run 0 Bash "$(j 'ls | tr "\n" " "' '{command:$v}')"                          'escape sequence \n is not a path'
+run 2 Bash "$(j 'type \\server\share\x' '{command:$v}')"                     'UNC path still denied'
 
 echo "== arithmetic false positives (allowed) =="
 run 0 Bash "$(j 'echo $(( (e - s) / 1000000 ))' '{command:$v}')"             'division with spaces'
