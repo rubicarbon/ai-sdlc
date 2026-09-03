@@ -34,7 +34,7 @@ case "$stage" in
     d=$(pick_feature) && [ -f "$d/spec.md" ] && exit 0
     echo "no spec found (expected <feature>/spec.md under $art/features/ or .scratch/): type /mattpocock-skills:to-spec"; exit 2 ;;
   build)
-    d=$(pick_feature) || { echo "no feature directory with tickets: type /mattpocock-skills:to-tickets"; exit 2; }
+    d=$(pick_feature); [ -n "$d" ] || { echo "no feature directory with tickets under $art/features/ or .scratch/: type /mattpocock-skills:to-tickets"; exit 2; }
     n=$(find "$d/issues" -maxdepth 1 -name '[0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
     [ "${n:-0}" -gt 0 ] || { echo "no tickets under $d/issues/: type /mattpocock-skills:to-tickets"; exit 2; }
     ready=$(grep -liE '^\**Status:\**[[:space:]]*ready-for-agent' "$d"/issues/[0-9][0-9]-*.md 2>/dev/null | wc -l | tr -d ' ')

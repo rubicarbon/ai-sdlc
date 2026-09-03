@@ -68,7 +68,7 @@ Ask `ai-sdlc:sdlc-loop` (or `/ai-sdlc:sdlc-status`) what comes next; it checks a
 
 | Tier | Name | What init renders |
 | --- | --- | --- |
-| 0 | Foundation | managed block in `CLAUDE.md`, `CONTEXT.md` seed, `docs/agents/domain.md`, deny rules in `.claude/settings.json`, `.gitignore` markers, metrics baseline |
+| 0 | Foundation | managed block in `CLAUDE.md`, `CONTEXT.md` seed, `docs/agents/domain.md`, deny rules in `.claude/settings.json`, `.gitignore` markers; the last next step is the metrics baseline |
 | 1 | Artifacts | `REVIEW.md`, `docs/agents/issue-tracker.md` (GitHub or Azure), the `.sdlc/` tree, `docs/adr/` |
 | 2 | Guardrails | `guardrails.requireTicket` on; branch protection through `sdlc-platform branch_protect_apply` |
 | 3 | Automation | CI templates (`.github/workflows/sdlc-*.yml` or `.azuredevops/pipelines/sdlc-*.yml`), PR template, `CODEOWNERS` (GitHub; Azure uses `azure.requiredReviewers`), cost caps, `sdlc-platform ci_workflow_install` |
@@ -93,7 +93,7 @@ All hooks live in `plugins/ai-sdlc/hooks/` and exit 0 silently in any repository
 
 ### Metrics
 
-`scripts/metrics/baseline.sh` and `collect.sh` export pull requests, deployments, incidents and reverts through `sdlc-platform metrics_export`, and `scripts/metrics/report.py` renders the four DORA keys plus counterweights (review depth, PR size, revert rate, cost per merged PR from `scripts/cost/report.sh`) with the sample size next to every number. The `sdlc-metrics-analyst` agent turns that into a short narrative for `/ai-sdlc:sdlc-metrics-report`; on Azure, PR size is null unless computed from local git.
+`scripts/metrics/baseline.sh` and `collect.sh` export pull requests, deployments, incidents and reverts through `sdlc-platform metrics_export`, and `scripts/metrics/report.py` renders the four DORA keys plus counterweights (revert rate, PR size, review latency, code churn, defect escape rate, cost per merged PR from `scripts/cost/report.sh`) with the sample size next to every number. The `sdlc-metrics-analyst` agent turns that into a short narrative for `/ai-sdlc:sdlc-metrics-report`; on Azure, PR size is null unless computed from local git.
 
 ## Repository layout
 
