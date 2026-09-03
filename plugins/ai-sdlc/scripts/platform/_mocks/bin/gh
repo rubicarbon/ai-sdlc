@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Mock GitHub CLI for conformance tests and --dry-run. Answers the subset of `gh`
+# the GitHub adapter uses, keeps a little state under $SDLC_MOCK_STATE so ids
+# increment and repeated links/protection are observable, and logs every call.
+set -u
+S="${SDLC_MOCK_STATE:-${TMPDIR:-/tmp}/ai-sdlc-mock-state}"; mkdir -p "$S"
+[ -n "${SDLC_MOCK_LOG:-}" ] && printf 'gh %s\n' "$*" >>"$SDLC_MOCK_LOG"
+REPO="mock-org/mock-repo"
+next_id() { local f="$S/$1.counter" n=0; [ -f "$f" ] && n=$(<"$f"); n=$((n+1)); echo "$n" >"$f"; echo "$n"; }
+arg_after() { local k="$1"; shift; while [ $# -gt 0 ]; do if [ "$1" = "$k" ]; then echo "${2:-}"; return; fi; shift; done; }
+has_flag() { local k="$1"; shift; for a in "$@"; do [ "$a" = "$k" ] && return 0; done; return 1; }
+file_content() { [ -n "$1" ] && [ -f "$1" ] && cat "$1"; }
+
+case "${1:-} ${2:-}" in
+  "auth status") echo "Logged in to github.com as mock-user"; exit 0 ;;
+  "label create") exit 0 ;;
+  "repo view")
+    echo '{"nameWithOwner":"mock-org/mock-repo","defaultBranchRef":{"name":"main"}}' | jq -c "${*:$#}" 2>/dev/null || echo '{"nameWithOwner":"mock-org/mock-repo","defaultBranchRef":{"name":"main"}}'
+    exit 0 ;;
+  "issue create")
+    n=$(next_id issue); title=$(arg_after --title "$@"); body=$(file_content "$(arg_after --body-file "$@")")
+    labels=$(printf '%s\n' "$@" | awk 'p{print;p=0} /^--label$/{p=1}' | jq -R . | jq -cs .)
+    jq -cn --arg n "$n" --arg t "$title" --arg b "$body" --argjson l "$labels" '{number:($n|tonumber),title:$t,body:$b,state:"OPEN",labels:($l|map({name:.})),url:("https://github.com/mock-org/mock-repo/issues/"+$n),createdAt:"2026-09-01T10:00:00Z",closedAt:null,assignees:[],id:(1000+($n|tonumber))}' >"$S/issue-$n.json"
+    echo "https://github.com/$REPO/issues/$n"; exit 0 ;;
+  "issue view")
+    n="$3"; f="$S/issue-$n.json"
+    [ -f "$f" ] || jq -cn --arg n "$n" '{number:($n|tonumber),title:("Issue "+$n),body:"Body of issue "+$n,state:"OPEN",labels:[{name:"ready-for-agent"}],url:("https://github.com/mock-org/mock-repo/issues/"+$n),createdAt:"2026-09-01T10:00:00Z",closedAt:null,assignees:[],id:(1000+($n|tonumber))}' >"$f"
+    cat "$f"; exit 0 ;;
+  "issue comment")
+    c=$(next_id comment); echo "https://github.com/$REPO/issues/$3#issuecomment-$c"; exit 0 ;;
+  "issue edit")
+    n="$3"; f="$S/issue-$n.json"; [ -f "$f" ] || gh issue view "$n" >/dev/null
+    body=$(file_content "$(arg_after --body-file "$@")")
+    jq -c --arg b "$body" '.body=$b' "$f" >"$f.tmp" && mv "$f.tmp" "$f"; exit 0 ;;
+  "issue list")
+    echo '[{"number":90,"createdAt":"2026-08-03T09:00:00Z","closedAt":"2026-08-03T15:30:00Z","labels":[{"name":"incident"}]},{"number":95,"createdAt":"2026-08-20T09:00:00Z","closedAt":null,"labels":[{"name":"incident"}]}]'; exit 0 ;;
+  "pr create")
+    n=$(next_id pr); echo "https://github.com/$REPO/pull/$n"; exit 0 ;;
+  "pr view")
+    n="$3"
+    jq -cn --arg n "$n" '{number:($n|tonumber),title:("PR "+$n),state:"OPEN",baseRefName:"main",headRefName:"feature/x",url:("https://github.com/mock-org/mock-repo/pull/"+$n),createdAt:"2026-09-01T10:00:00Z",mergedAt:null,closedAt:null,additions:120,deletions:8,changedFiles:4,reviewDecision:"REVIEW_REQUIRED",author:{login:"mock-user"}}'; exit 0 ;;
+  "pr comment")
+    c=$(next_id comment); echo "https://github.com/$REPO/pull/$3#issuecomment-$c"; exit 0 ;;
+  "pr checks")
+    case "${SDLC_MOCK_CHECKS:-pass}" in
+      fail) echo '[{"name":"ci","state":"FAILURE","link":"https://github.com/mock-org/mock-repo/actions/runs/1"},{"name":"lint","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/2"}]'; exit 1 ;;
+      pending) echo '[{"name":"ci","state":"PENDING","link":"https://github.com/mock-org/mock-repo/actions/runs/1"}]'; exit 8 ;;
+      *) echo '[{"name":"ci","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/1"},{"name":"lint","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/2"}]'; exit 0 ;;
+    esac ;;
+  "pr list")
+    echo '[{"number":70,"title":"Add thing","createdAt":"2026-08-01T09:00:00Z","mergedAt":"2026-08-02T12:00:00Z","additions":200,"deletions":20,"changedFiles":6,"author":{"login":"dev-a"},"reviews":[{"submittedAt":"2026-08-01T15:00:00Z","state":"APPROVED"}],"commits":[{"committedDate":"2026-07-31T08:00:00Z"}]},{"number":71,"title":"Revert \"Add thing\"","createdAt":"2026-08-03T09:00:00Z","mergedAt":"2026-08-03T10:00:00Z","additions":20,"deletions":200,"changedFiles":6,"author":{"login":"dev-b"},"reviews":[],"commits":[{"committedDate":"2026-08-03T08:30:00Z"}]}]'; exit 0 ;;
+  "run list")
+    echo '[{"databaseId":501,"conclusion":"success","createdAt":"2026-08-02T12:05:00Z","updatedAt":"2026-08-02T12:15:00Z","headSha":"aaa111"},{"databaseId":502,"conclusion":"failure","createdAt":"2026-08-03T10:05:00Z","updatedAt":"2026-08-03T10:09:00Z","headSha":"bbb222"}]'; exit 0 ;;
+  "api "*)
+    path=""; method="GET"
+    args=("$@"); i=1
+    while [ $i -lt ${#args[@]} ]; do
+      case "${args[$i]}" in -X|--method) method="${args[$((i+1))]}"; i=$((i+2)); continue ;; -F|-f|--jq|-H|--input) i=$((i+2)); continue ;; --paginate) i=$((i+1)); continue ;; -*) i=$((i+1)); continue ;; *) path="${args[$i]}"; i=$((i+1)) ;; esac
+    done
+    case "$method $path" in
+      "POST "*/dependencies/blocked_by)
+        [ "${SDLC_MOCK_GH_NO_DEPS:-0}" = "1" ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+        echo "$path $(arg_after -F "$@")" >>"$S/deps.log"; echo '{"id":1,"number":1}'; exit 0 ;;
+      "POST "*/sub_issues) echo '{"id":1}'; exit 0 ;;
+      "PUT "*/branches/*/protection) inp=$(arg_after --input "$@"); if [ -n "$inp" ] && [ -f "$inp" ]; then cp "$inp" "$S/protection.json"; else cat >"$S/protection.json"; fi; cat "$S/protection.json"; exit 0 ;;
+      "GET "*/branches/*/protection) if [ -f "$S/protection.json" ]; then cat "$S/protection.json"; exit 0; else echo "gh: Branch not protected (HTTP 404)" >&2; exit 1; fi ;;
+      "GET "*/issues/*/dependencies/blocked_by) echo '[]'; exit 0 ;;
+      "GET "*/deployments/*/statuses) echo '[{"state":"success","created_at":"2026-08-02T12:15:00Z"}]'; exit 0 ;;
+      "GET "*/deployments*) echo '[{"id":9001,"environment":"production","created_at":"2026-08-02T12:05:00Z","updated_at":"2026-08-02T12:15:00Z","sha":"aaa111"},{"id":9002,"environment":"production","created_at":"2026-08-10T12:05:00Z","updated_at":"2026-08-10T12:15:00Z","sha":"ccc333"}]'; exit 0 ;;
+      "GET "*/issues/*) n="${path##*/issues/}"; n="${n%%/*}"; jq -cn --arg n "$n" '{id:(1000+($n|tonumber)),number:($n|tonumber),node_id:"I_mock"}'; exit 0 ;;
+    esac
+    echo "mock gh: unhandled api $method $path" >&2; exit 1 ;;
+esac
+echo "mock gh: unhandled command: $*" >&2; exit 1

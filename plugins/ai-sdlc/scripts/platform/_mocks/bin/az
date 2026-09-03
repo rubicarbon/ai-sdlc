@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Mock Azure CLI for conformance tests and --dry-run. Answers the subset of `az`
+# the Azure adapter uses, keeps state under $SDLC_MOCK_STATE, logs every call.
+set -u
+S="${SDLC_MOCK_STATE:-${TMPDIR:-/tmp}/ai-sdlc-mock-state}"; mkdir -p "$S"
+[ -n "${SDLC_MOCK_LOG:-}" ] && printf 'az %s\n' "$*" >>"$SDLC_MOCK_LOG"
+ORG="https://dev.azure.com/mock-org"; PROJ="mock-proj"; REPO="mock-repo"; REPO_ID="11111111-2222-3333-4444-555555555555"
+next_id() { local f="$S/$1.counter" n=0; [ -f "$f" ] && n=$(<"$f"); n=$((n+1)); echo "$n" >"$f"; echo "$n"; }
+arg_after() { local k="$1"; shift; while [ $# -gt 0 ]; do if [ "$1" = "$k" ]; then echo "${2:-}"; return; fi; shift; done; }
+query=$(arg_after --query "$@"); output=$(arg_after -o "$@"); [ -z "$output" ] && output=$(arg_after --output "$@")
+emit() {  # apply --query (subset: dotted path) and -o tsv when asked
+  local json="$1"
+  if [ -n "$query" ]; then
+    case "$query" in
+      \[?*) json=$(echo "$json" | jq -c '.') ;;                  # JMESPath filters: return everything
+      *) json=$(echo "$json" | jq -c ".$query" 2>/dev/null || echo "$json") ;;
+    esac
+  fi
+  if [ "$output" = "tsv" ]; then echo "$json" | jq -r 'if type=="array" then .[]|tostring else tostring end'; else echo "$json"; fi
+}
+
+case "${1:-} ${2:-} ${3:-}" in
+  "account show "*) emit '{"user":{"name":"mock@example.com"},"tenantId":"t"}'; exit 0 ;;
+  "extension show "*) emit '{"name":"azure-devops","version":"1.0.0"}'; exit 0 ;;
+  "devops configure "*) echo "[defaults]"; echo "organization = $ORG"; echo "project = $PROJ"; exit 0 ;;
+  "devops project show") emit '{"id":"p1","name":"mock-proj","capabilities":{"processTemplate":{"templateName":"Agile"}}}'; exit 0 ;;
+  "boards work-item "*)
+    case "$3 ${4:-}" in
+      "create "*)
+        n=$(next_id wi); title=$(arg_after --title "$@"); type=$(arg_after --type "$@"); desc=$(arg_after --description "$@")
+        tags=$(arg_after --fields "$@"); tags="${tags#System.Tags=}"
+        jq -cn --arg n "$n" --arg t "$title" --arg ty "$type" --arg d "$desc" --arg tags "$tags" '{id:($n|tonumber),rev:1,url:("https://dev.azure.com/mock-org/_apis/wit/workItems/"+$n),fields:{"System.Title":$t,"System.WorkItemType":$ty,"System.State":"New","System.Description":$d,"System.Tags":$tags,"System.CreatedDate":"2026-09-01T10:00:00Z","System.AssignedTo":null},_links:{html:{href:("https://dev.azure.com/mock-org/mock-proj/_workitems/edit/"+$n)}},relations:[]}' >"$S/wi-$n.json"
+        emit "$(cat "$S/wi-$n.json")"; exit 0 ;;
+      "show "*)
+        n=$(arg_after --id "$@"); f="$S/wi-$n.json"
+        [ -f "$f" ] || jq -cn --arg n "$n" '{id:($n|tonumber),rev:1,url:("https://dev.azure.com/mock-org/_apis/wit/workItems/"+$n),fields:{"System.Title":("Work item "+$n),"System.WorkItemType":"User Story","System.State":"Active","System.Description":("<p>Body of work item "+$n+"</p>"),"System.Tags":"ready-for-agent","System.CreatedDate":"2026-09-01T10:00:00Z","System.AssignedTo":{"uniqueName":"dev@example.com"}},_links:{html:{href:("https://dev.azure.com/mock-org/mock-proj/_workitems/edit/"+$n)}},relations:[]}' >"$f"
+        emit "$(cat "$f")"; exit 0 ;;
+      "update "*)
+        n=$(arg_after --id "$@"); f="$S/wi-$n.json"; [ -f "$f" ] || az boards work-item show --id "$n" >/dev/null
+        c=$(next_id wicomment); jq -c --arg c "$c" '.rev+=1 | .lastComment=$c' "$f" >"$f.tmp" && mv "$f.tmp" "$f"; emit "$(cat "$f")"; exit 0 ;;
+      "relation add")
+        a=$(arg_after --id "$@"); t=$(arg_after --relation-type "$@"); b=$(arg_after --target-id "$@")
+        key="$a|${t,,}|$b"
+        if [ -f "$S/relations.log" ] && grep -qxF "$key" "$S/relations.log"; then
+          echo "TF201036: You cannot add a $t link between work items $a and $b because a link of that type already exists." >&2; exit 1
+        fi
+        echo "$key" >>"$S/relations.log"
+        jq -cn --arg a "$a" --arg t "$t" --arg b "$b" '{id:($a|tonumber),relations:[{rel:$t,url:("https://dev.azure.com/mock-org/_apis/wit/workItems/"+$b)}]}'; exit 0 ;;
+      "relation list-type")
+        emit '[{"referenceName":"System.LinkTypes.Dependency-Forward","name":"Successor"},{"referenceName":"System.LinkTypes.Dependency-Reverse","name":"Predecessor"},{"referenceName":"System.LinkTypes.Hierarchy-Forward","name":"Child"},{"referenceName":"System.LinkTypes.Hierarchy-Reverse","name":"Parent"},{"referenceName":"System.LinkTypes.Related","name":"Related"}]'; exit 0 ;;
+    esac ;;
+  "boards query "*)
+    emit '[{"id":301,"fields":{"System.Id":301,"System.CreatedDate":"2026-08-03T09:00:00Z","Microsoft.VSTS.Common.ClosedDate":"2026-08-03T15:30:00Z","System.Tags":"incident"}},{"id":305,"fields":{"System.Id":305,"System.CreatedDate":"2026-08-20T09:00:00Z","Microsoft.VSTS.Common.ClosedDate":null,"System.Tags":"incident"}}]'; exit 0 ;;
+  "repos show "*) emit "{\"id\":\"$REPO_ID\",\"name\":\"$REPO\",\"webUrl\":\"$ORG/$PROJ/_git/$REPO\",\"defaultBranch\":\"refs/heads/main\"}"; exit 0 ;;
+  "repos pr create")
+    n=$(next_id pr); title=$(arg_after --title "$@"); src=$(arg_after --source-branch "$@"); tgt=$(arg_after --target-branch "$@")
+    jq -cn --arg n "$n" --arg t "$title" --arg s "$src" --arg g "$tgt" --arg w "$ORG/$PROJ/_git/$REPO" '{pullRequestId:($n|tonumber),title:$t,status:"active",sourceRefName:("refs/heads/"+$s),targetRefName:("refs/heads/"+$g),creationDate:"2026-09-01T10:00:00Z",closedDate:null,createdBy:{uniqueName:"mock@example.com"},repository:{webUrl:$w},reviewers:[]}'; exit 0 ;;
+  "repos pr show")
+    n=$(arg_after --id "$@")
+    emit "$(jq -cn --arg n "$n" --arg w "$ORG/$PROJ/_git/$REPO" '{pullRequestId:($n|tonumber),title:("PR "+$n),status:"active",sourceRefName:"refs/heads/feature/x",targetRefName:"refs/heads/main",creationDate:"2026-09-01T10:00:00Z",closedDate:null,createdBy:{uniqueName:"mock@example.com"},repository:{webUrl:$w},reviewers:[{vote:0,uniqueName:"lead@example.com"}],lastMergeSourceCommit:{commitId:"deadbeef"}}')"; exit 0 ;;
+  "repos pr policy")
+    case "${SDLC_MOCK_CHECKS:-pass}" in
+      fail) emit '[{"configuration":{"type":{"displayName":"Build"},"settings":{"displayName":"sdlc-pr-review"}},"status":"rejected","context":{"buildId":77}},{"configuration":{"type":{"displayName":"Minimum number of reviewers"}},"status":"approved"}]' ;;
+      pending) emit '[{"configuration":{"type":{"displayName":"Build"},"settings":{"displayName":"sdlc-pr-review"}},"status":"running"}]' ;;
+      *) emit '[{"configuration":{"type":{"displayName":"Build"},"settings":{"displayName":"sdlc-pr-review"}},"status":"approved","context":{"buildId":77}},{"configuration":{"type":{"displayName":"Minimum number of reviewers"}},"status":"approved"}]' ;;
+    esac; exit 0 ;;
+  "repos pr list")
+    emit "$(jq -cn --arg w "$ORG/$PROJ/_git/$REPO" '[{pullRequestId:70,title:"Add thing",status:"completed",creationDate:"2026-08-01T09:00:00Z",closedDate:"2026-08-02T12:00:00Z",createdBy:{uniqueName:"dev-a@example.com"},lastMergeSourceCommit:{commitId:"aaa111"},lastMergeTargetCommit:{commitId:"000000"},repository:{webUrl:$w}},{pullRequestId:71,title:"Revert \"Add thing\"",status:"completed",creationDate:"2026-08-03T09:00:00Z",closedDate:"2026-08-03T10:00:00Z",createdBy:{uniqueName:"dev-b@example.com"},lastMergeSourceCommit:{commitId:"bbb222"},lastMergeTargetCommit:{commitId:"aaa111"},repository:{webUrl:$w}}]')"; exit 0 ;;
+  "repos policy list")
+    if [ -f "$S/policies.json" ]; then cat "$S/policies.json"; else echo '[]'; fi; exit 0 ;;
+  "repos policy "*)
+    kind="$3"; action="${4:-}"
+    case "$kind" in approver-count) dn="Minimum number of reviewers" ;; required-reviewer) dn="Required reviewers" ;; build) dn="Build" ;; work-item-linking) dn="Work item linking" ;; comment-required) dn="Comment requirements" ;; merge-strategy) dn="Require a merge strategy" ;; *) dn="$kind" ;; esac
+    case "$action" in
+      create)
+        n=$(next_id policy); [ -f "$S/policies.json" ] || echo '[]' >"$S/policies.json"
+        jq -c --arg n "$n" --arg dn "$dn" '. + [{id:($n|tonumber),isEnabled:true,isBlocking:true,type:{displayName:$dn},settings:{scope:[{refName:"refs/heads/main",matchKind:"exact"}]}}]' "$S/policies.json" >"$S/policies.json.tmp" && mv "$S/policies.json.tmp" "$S/policies.json"
+        jq -cn --arg n "$n" --arg dn "$dn" '{id:($n|tonumber),type:{displayName:$dn}}'; exit 0 ;;
+      update) n=$(arg_after --id "$@"); jq -cn --arg n "$n" --arg dn "$dn" '{id:($n|tonumber),type:{displayName:$dn}}'; exit 0 ;;
+    esac ;;
+  "pipelines list "*)
+    name=$(arg_after --name "$@")
+    if [ -n "$name" ] && [ -f "$S/pipeline-$name" ]; then cat "$S/pipeline-$name"; else echo '[]'; fi; exit 0 ;;
+  "pipelines create "*)
+    n=$(next_id pipeline); name=$(arg_after --name "$@")
+    jq -cn --arg n "$n" --arg name "$name" '[{id:($n|tonumber),name:$name}]' >"$S/pipeline-$name"; jq -c '.[0]' "$S/pipeline-$name"; exit 0 ;;
+  "pipelines runs list")
+    emit '[{"id":501,"result":"succeeded","queueTime":"2026-08-02T12:05:00Z","finishTime":"2026-08-02T12:15:00Z","sourceVersion":"aaa111"},{"id":502,"result":"failed","queueTime":"2026-08-03T10:05:00Z","finishTime":"2026-08-03T10:09:00Z","sourceVersion":"bbb222"}]'; exit 0 ;;
+  "rest "*)
+    method=$(arg_after --method "$@"); uri=$(arg_after --uri "$@")
+    case "${method,,} $uri" in
+      "post "*/threads*) c=$(next_id thread); jq -cn --arg c "$c" '{id:($c|tonumber),status:"active"}'; exit 0 ;;
+      "get "*/threads*) emit '{"value":[{"id":1,"publishedDate":"2026-08-01T15:00:00Z","properties":{"CodeReviewVoteResult":{"$value":"10"}}},{"id":2,"publishedDate":"2026-08-01T11:00:00Z","properties":{}}]}'; exit 0 ;;
+    esac ;;
+esac
+echo "mock az: unhandled command: $*" >&2; exit 1

@@ -1,0 +1,7 @@
+name: sdlc-mock
+on: [pull_request]
+jobs:
+  mock:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "{{REPO_OWNER}}/{{REPO_NAME}} on {{REPO_DEFAULT_BRANCH}}"

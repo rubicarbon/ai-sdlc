@@ -1,0 +1,8 @@
+trigger: none
+pr:
+  branches:
+    include: ["{{REPO_DEFAULT_BRANCH}}"]
+pool:
+  vmImage: ubuntu-latest
+steps:
+  - script: echo "{{AZURE_PROJECT}}/{{AZURE_REPO}}"

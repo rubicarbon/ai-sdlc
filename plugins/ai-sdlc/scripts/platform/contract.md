@@ -86,8 +86,9 @@ Azure URL is `<repository.webUrl>/pullrequest/<id>`.
 ### `branch_protect_apply <branch>`
 Idempotent: applies the protection described in `templates/github/branch-protection.json` or `templates/azure/branch-policies.json`, rendered with the project's config (required checks, reviewers, approval count). Running it twice reports everything under `unchanged`.
 ```json
-{"branch":"main","applied":["approver-count"],"unchanged":["build","comment-required"],"platform":"azure"}
+{"branch":"main","applied":["approver-count"],"unchanged":["comment-required"],"skipped":["build: pipeline 'sdlc-pr-review' is not registered yet (run ci_workflow_install first)"],"platform":"azure"}
 ```
+`skipped` lists policies that could not be applied yet and why (GitHub always prints `[]`).
 - GitHub: `PUT /repos/{o}/{r}/branches/{b}/protection` (replace semantics) with code-owner reviews required.
 - Azure: `az repos policy list` then create or update `approver-count`, `required-reviewer` (config `azure.requiredReviewers`; there is no CODEOWNERS on Azure Repos), `build` (when a pipeline id is known), `work-item-linking`, `comment-required`.
 

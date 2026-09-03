@@ -1,0 +1,43 @@
+{
+  "branch": "{{REPO_DEFAULT_BRANCH}}",
+  "policies": [
+    {
+      "kind": "approver-count",
+      "displayName": "Minimum number of reviewers",
+      "settings": {
+        "minimumApproverCount": {{REVIEW_REQUIRED_APPROVALS}},
+        "creatorVoteCounts": false,
+        "allowDownvotes": false,
+        "resetOnSourcePush": true
+      }
+    },
+    {
+      "kind": "required-reviewer",
+      "displayName": "Required reviewers",
+      "settings": {
+        "requiredReviewerIds": {{AZURE_REQUIRED_REVIEWERS_JSON}},
+        "message": "ai-sdlc: a human code owner must approve every agent-authored change"
+      }
+    },
+    {
+      "kind": "work-item-linking",
+      "displayName": "Work item linking",
+      "settings": {}
+    },
+    {
+      "kind": "comment-required",
+      "displayName": "Comment requirements",
+      "settings": {}
+    },
+    {
+      "kind": "build",
+      "displayName": "Build",
+      "settings": {
+        "pipelineName": "{{AZURE_PIPELINE_NAME}}",
+        "queueOnSourceUpdateOnly": true,
+        "manualQueueOnly": false,
+        "validDuration": 720
+      }
+    }
+  ]
+}
