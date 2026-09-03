@@ -25,7 +25,9 @@
   },
   "team": {
     "mode": "team",
-    "enablePluginForTeam": true
+    "enablePluginForTeam": true,
+    "codeowners": "@contoso/platform-leads",
+    "securityOwners": "@contoso/security @contoso/platform-leads"
   },
   "review": {
     "requiredApprovals": 1,

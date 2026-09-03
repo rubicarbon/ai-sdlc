@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "platform": "azure",
+  "tier": 2,
+  "repo": { "owner": "mock-org", "name": "mock-repo", "defaultBranch": "main" },
+  "commands": { "verify": "bash verify-mock.sh", "lint": "bash lint-mock.sh" },
+  "environments": { "prod": { "gate": "human", "deployCommandPatterns": ["git push * main", "az pipelines run *", "kubectl apply *"] } },
+  "guardrails": { "requireTicket": true },
+  "artifacts": { "dir": ".sdlc" },
+  "azure": { "organization": "https://dev.azure.com/mock-org", "project": "mock-proj", "repo": "mock-repo" }
+}

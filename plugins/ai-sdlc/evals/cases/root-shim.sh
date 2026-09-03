@@ -15,8 +15,10 @@ out=$(probe CLAUDE_PLUGIN_ROOT=/);               assert_eq "$pn|script-path|0.1.
 out=$(probe CLAUDE_PLUGIN_ROOT="$EVAL_TMP");     assert_eq "$pn|script-path|0.1.0" "$out" "variable pointing at a non-plugin dir is rejected"
 
 # Sourced through a relative path with `..` (how hooks and adapter scripts reach it).
-out=$(cd "$P/hooks" 2>/dev/null || cd "$P/scripts/platform"; env -u CLAUDE_PLUGIN_ROOT bash -c '. "../_root.sh" 2>/dev/null || . "../../scripts/_root.sh"; printf "%s|%s" "$SDLC_PLUGIN_ROOT" "$SDLC_ROOT_SOURCE"')
-assert_eq "$pn|script-path" "$out" "relative source path with .. resolves to the real root"
+out=$(cd "$P/hooks" && env -u CLAUDE_PLUGIN_ROOT bash -c '. "../scripts/_root.sh"; printf "%s|%s" "$SDLC_PLUGIN_ROOT" "$SDLC_ROOT_SOURCE"')
+assert_eq "$pn|script-path" "$out" "relative source path from hooks/ resolves to the real root"
+out=$(cd "$P/scripts/platform/github" && env -u CLAUDE_PLUGIN_ROOT bash -c '. "../../_root.sh"; printf "%s|%s" "$SDLC_PLUGIN_ROOT" "$SDLC_ROOT_SOURCE"')
+assert_eq "$pn|script-path" "$out" "relative source path from an adapter dir resolves to the real root"
 out=$(env -u CLAUDE_PLUGIN_ROOT bash -c '. "$1/scripts/platform/../_root.sh"; printf "%s" "$SDLC_PLUGIN_ROOT"' _ "$P")
 assert_eq "$pn" "$out" "absolute source path containing .. resolves to the real root"
 

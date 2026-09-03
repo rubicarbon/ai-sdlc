@@ -1,0 +1,16 @@
+# ai-sdlc: every path needs a human code owner's approval before merge (branch protection
+# requires code-owner reviews). Human-only areas get the security owners in addition.
+*                                   {{TEAM_CODEOWNERS}}
+
+# Human-only areas: authentication, authorisation, cryptography, payments, billing.
+**/auth/**                          {{TEAM_SECURITY_OWNERS}}
+**/authz/**                         {{TEAM_SECURITY_OWNERS}}
+**/crypto/**                        {{TEAM_SECURITY_OWNERS}}
+**/payment*/**                      {{TEAM_SECURITY_OWNERS}}
+**/billing/**                       {{TEAM_SECURITY_OWNERS}}
+
+# The SDLC configuration itself.
+/sdlc.config.json                   {{TEAM_CODEOWNERS}}
+/.claude/settings.json              {{TEAM_CODEOWNERS}}
+/.github/workflows/                 {{TEAM_CODEOWNERS}}
+/REVIEW.md                          {{TEAM_CODEOWNERS}}

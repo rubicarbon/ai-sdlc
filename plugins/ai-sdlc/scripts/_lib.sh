@@ -40,6 +40,17 @@ sdlc_abs_path() {  # make a path absolute against $PWD, lexically
   printf '%s' "${r:-/}"
 }
 
+# sdlc_python -> prints a Python 3 interpreter that actually runs. On Windows `python3` is often
+# the Microsoft Store stub, which exists on PATH but only prints an install hint, so each
+# candidate is executed rather than merely looked up.
+sdlc_python() {
+  local c
+  for c in python3 python py; do
+    if "$c" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1; then printf '%s' "$c"; return 0; fi
+  done
+  return 1
+}
+
 sdlc_iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 sdlc_today()   { date -u +%Y-%m-%d; }
 

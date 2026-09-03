@@ -1,0 +1,5 @@
+[
+  {"type":"system","subtype":"init","session_id":"3b1c1f0e-2222-4a0a-9c1e-000000000002"},
+  {"type":"assistant","message":{"content":[{"type":"text","text":"Reading the diff."}]}},
+  {"type":"result","subtype":"success","is_error":false,"duration_ms":92011,"num_turns":9,"total_cost_usd":0.63,"session_id":"3b1c1f0e-2222-4a0a-9c1e-000000000002"}
+]

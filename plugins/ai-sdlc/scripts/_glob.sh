@@ -13,9 +13,11 @@
 #   - a trailing "/" matches a directory prefix (`build/` == `build/**`)
 
 sdlc__glob_to_ere() {
-  local g="$1" out="" i c anchored=0
+  local g="$1" out="" i c anchored=0 dir_self=""
   case "$g" in /*) anchored=1; g="${g#/}" ;; esac
   case "$g" in */) g="${g}**" ;; esac
+  # `dir/**` also matches `dir` itself (a Grep or Glob aimed at the directory)
+  case "$g" in */\*\*) g="${g%/\*\*}"; dir_self="(/.*)?" ;; esac
   local n=${#g}
   i=0
   while [ $i -lt $n ]; do
@@ -33,10 +35,9 @@ sdlc__glob_to_ere() {
     esac
     i=$((i+1))
   done
+  out="$out$dir_self"
   if [ $anchored = 1 ]; then
     printf '^%s$' "$out"
-  elif [[ "$1" == */* ]]; then
-    printf '^(.*/)?%s$' "$out"
   else
     printf '^(.*/)?%s$' "$out"
   fi

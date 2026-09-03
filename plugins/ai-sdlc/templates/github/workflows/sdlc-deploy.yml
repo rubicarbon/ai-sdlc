@@ -1,0 +1,61 @@
+# ai-sdlc: environment tiers with a human-gated production step.
+# staging deploys automatically; production runs in the GitHub environment "production",
+# whose required reviewers (set in Settings > Environments, see scripts/sdlc-setup-wizard.sh)
+# are the human gate. Each deployment is recorded through the Deployments API so
+# /ai-sdlc:sdlc-metrics-report can compute deployment frequency, lead time and CFR.
+# The repository owns the deploy mechanics in scripts/deploy.sh <environment> <sha>.
+name: sdlc-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit to deploy (defaults to the workflow's commit)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: sdlc-deploy
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+      - name: Deploy to staging
+        run: bash scripts/deploy.sh staging "${{ inputs.sha != '' && inputs.sha || github.sha }}"
+
+  production:
+    needs: staging
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - name: Open a deployment record
+        id: dep
+        run: |
+          id=$(gh api -X POST "repos/${{ github.repository }}/deployments" -f ref="$SHA" -f environment=production -F auto_merge=false -F required_contexts='[]' --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          gh api -X POST "repos/${{ github.repository }}/deployments/$id/statuses" -f state=in_progress >/dev/null
+      - name: Deploy to production
+        run: bash scripts/deploy.sh production "$SHA"
+      - name: Close the deployment record
+        if: always()
+        run: |
+          state=success; [ "${{ job.status }}" = "success" ] || state=failure
+          gh api -X POST "repos/${{ github.repository }}/deployments/${{ steps.dep.outputs.id }}/statuses" -f state="$state" -f log_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >/dev/null

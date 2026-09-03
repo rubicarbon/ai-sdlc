@@ -9,6 +9,8 @@ assert_eq yes "$(m '*.test.ts' 'src/a/b.test.ts')"            'basename pattern 
 assert_eq no  "$(m '*.test.ts' 'src/a/b.ts')"                 'basename pattern rejects other files'
 assert_eq yes "$(m '**/__tests__/**' 'pkg/__tests__/x.js')"   '**/dir/** matches nested'
 assert_eq yes "$(m 'secrets/**' 'secrets/k.pem')"             'dir/** at root'
+assert_eq yes "$(m 'secrets/**' 'secrets')"                   'dir/** matches the directory itself'
+assert_eq no  "$(m 'secrets/**' 'secretsx')"                  'dir/** does not match a prefix'
 assert_eq yes "$(m 'secrets/**' 'ops/secrets/k.pem')"         'dir/** at depth (deny-style)'
 assert_eq no  "$(m '/secrets/**' 'ops/secrets/k.pem')"        'anchored /dir/** rejects nested copy'
 assert_eq yes "$(m '/secrets/**' 'secrets/k.pem')"            'anchored /dir/** matches at root'

@@ -6,6 +6,9 @@
 EVAL_FAILS=0
 case "${OSTYPE:-}" in msys*|cygwin*|win32*) jq() { command jq -b "$@"; } ;; esac   # Windows jq writes CRLF
 
+# eval_python -> a Python 3 that runs (the Windows Store stub `python3` exists but only prints a hint)
+eval_python() { local c; for c in python3 python py; do "$c" -c 'import sys' >/dev/null 2>&1 && { printf '%s' "$c"; return 0; }; done; return 1; }
+
 _ok()   { printf '  ok    %s\n' "$1"; }
 _fail() { printf '  FAIL  %s\n        %s\n' "$1" "${2:-}"; EVAL_FAILS=$((EVAL_FAILS+1)); }
 

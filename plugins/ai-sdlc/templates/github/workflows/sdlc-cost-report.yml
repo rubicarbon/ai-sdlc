@@ -1,0 +1,58 @@
+# ai-sdlc: weekly spend report for agent runs in CI.
+# Sums the sdlc-cost-* artifacts of the last 7 days, writes the summary, and opens or
+# updates an issue labelled sdlc-cost when spend crosses the alert threshold.
+name: sdlc-cost-report
+
+on:
+  schedule:
+    - cron: "5 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      THRESHOLD_USD: "{{COST_ALERT_THRESHOLD_USD}}"
+    steps:
+      - name: Collect cost artifacts from the last 7 days
+        run: |
+          mkdir -p costs
+          since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.name | startswith(\"sdlc-cost-\")) | select(.created_at >= \"$since\") | select(.expired == false) | .id" > ids.txt
+          while read -r id; do
+            [ -n "$id" ] || continue
+            gh api "repos/${{ github.repository }}/actions/artifacts/$id/zip" > "costs/$id.zip" && unzip -o -q "costs/$id.zip" -d "costs/$id" || true
+          done < ids.txt
+          find costs -name 'sdlc-cost.json' > files.txt
+          echo "runs=$(wc -l < files.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Summarise
+        id: sum
+        run: |
+          total=$(cat $(cat files.txt) 2>/dev/null | jq -s '[.[].total_cost_usd] | add // 0')
+          runs=$(wc -l < files.txt | tr -d ' ')
+          avg=$(jq -n --argjson t "$total" --argjson r "$runs" 'if $r > 0 then ($t / $r) else 0 end')
+          {
+            echo "### ai-sdlc agent spend, last 7 days"
+            echo "| Runs | Total (USD) | Per run (USD) | Alert threshold (USD) |"
+            echo "| --- | --- | --- | --- |"
+            echo "| $runs | $total | $avg | $THRESHOLD_USD |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
+
+      - name: Alert when spend crosses the threshold
+        if: ${{ fromJSON(steps.sum.outputs.total) > fromJSON(env.THRESHOLD_USD) }}
+        run: |
+          gh label create sdlc-cost --force --color D93F0B --description "ai-sdlc spend alert" >/dev/null 2>&1 || true
+          existing=$(gh issue list --label sdlc-cost --state open --json number --jq '.[0].number // empty')
+          body="Agent runs in CI cost **${{ steps.sum.outputs.total }} USD** over the last 7 days (${{ steps.sum.outputs.runs }} runs), above the alert threshold of $THRESHOLD_USD USD set in sdlc.config.json (cost.alertThresholdUsd). Lower cost.maxTurns / cost.maxBudgetUsd, or raise the threshold deliberately."
+          if [ -n "$existing" ]; then gh issue comment "$existing" --body "$body"; else gh issue create --title "ai-sdlc: agent spend above threshold" --label sdlc-cost --body "$body"; fi

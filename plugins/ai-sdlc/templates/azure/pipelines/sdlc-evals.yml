@@ -1,0 +1,47 @@
+# ai-sdlc: regression-test the SDLC configuration itself, weekly and on config changes.
+trigger:
+  branches:
+    include:
+      - {{REPO_DEFAULT_BRANCH}}
+  paths:
+    include:
+      - sdlc.config.json
+      - CLAUDE.md
+      - REVIEW.md
+      - .claude/*
+      - .azuredevops/*
+      - docs/agents/*
+
+schedules:
+  - cron: "17 6 * * 1"
+    displayName: Weekly SDLC evals
+    branches:
+      include:
+        - {{REPO_DEFAULT_BRANCH}}
+    always: true
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+
+  - script: |
+      set -euo pipefail
+      git clone --depth 1 https://github.com/{{MARKETPLACE_REPO}}.git "$(Agent.TempDirectory)/ai-sdlc-kit"
+      echo "##vso[task.setvariable variable=PLUGIN]$(Agent.TempDirectory)/ai-sdlc-kit/plugins/ai-sdlc"
+    displayName: Fetch the ai-sdlc plugin ({{PLUGIN_VERSION}})
+
+  - script: bash "$(PLUGIN)/scripts/config/validate.sh" sdlc.config.json --schema "$(Agent.TempDirectory)/ai-sdlc-kit/sdlc.config.schema.json"
+    displayName: Validate sdlc.config.json against the schema
+
+  - script: bash "$(PLUGIN)/scripts/init/run.sh" --check --repo-dir "$(Build.SourcesDirectory)"
+    displayName: Check rendered files for drift
+
+  - script: bash "$(PLUGIN)/evals/run.sh"
+    displayName: Run the plugin's own evals on Linux
+
+  - script: |
+      sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck >/dev/null
+      shellcheck -S warning "$(PLUGIN)"/hooks/*.sh "$(PLUGIN)"/scripts/*.sh "$(PLUGIN)"/scripts/*/*.sh "$(PLUGIN)"/scripts/platform/*/*.sh "$(PLUGIN)"/bin/sdlc-platform
+    displayName: Shell lint

@@ -12,19 +12,20 @@
 # Exports SDLC_PROJECT_DIR, SDLC_CONFIG. Provides sdlc_config (lazy jq read) and
 # SDLC_ARTIFACTS once the config is read.
 
-sdlc__find_config() {
+sdlc__find_config() {  # -> SDLC_PROJECT_DIR (builtins only: no subshell on the silent path)
   local d="${SDLC_CWD:-$PWD}"
+  SDLC_PROJECT_DIR=""
   d="${d//\\//}"
   if [[ "$d" =~ ^([A-Za-z]):(/.*)?$ ]]; then d="/${BASH_REMATCH[1],,}${BASH_REMATCH[2]}"; fi
   while :; do
-    if [ -f "$d/sdlc.config.json" ]; then printf '%s' "$d"; return 0; fi
-    [ -d "$d/.git" ] || [ -f "$d/.git" ] && return 1     # repo root reached without a config
+    if [ -f "$d/sdlc.config.json" ]; then SDLC_PROJECT_DIR="$d"; return 0; fi
+    { [ -d "$d/.git" ] || [ -f "$d/.git" ]; } && return 1     # repo root reached without a config
     case "$d" in */*) d="${d%/*}"; [ -z "$d" ] && return 1 ;; *) return 1 ;; esac
     [ "$d" = "/" ] && return 1
   done
 }
 
-SDLC_PROJECT_DIR=$(sdlc__find_config) || SDLC_PROJECT_DIR=""
+sdlc__find_config || SDLC_PROJECT_DIR=""
 if [ -z "$SDLC_PROJECT_DIR" ]; then
   if [ "${SDLC_PROJECT_OPTIONAL:-0}" = "1" ]; then
     SDLC_CONFIG=""
@@ -36,10 +37,11 @@ fi
 SDLC_CONFIG="$SDLC_PROJECT_DIR/sdlc.config.json"
 export SDLC_PROJECT_DIR SDLC_CONFIG
 
-# sdlc_config <jq filter> [default]  -> prints the value (raw) or the default
+# sdlc_config <jq filter> [default]  -> prints the value (raw) or the default.
+# `false` is a real value here (jq's `//` would treat it as missing).
 sdlc_config() {
   local v
-  v=$(jq -r "$1 // empty" "$SDLC_CONFIG" 2>/dev/null)
+  v=$(jq -r "$1 | if . == null then empty else . end" "$SDLC_CONFIG" 2>/dev/null)
   if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "${2:-}"; fi
 }
 

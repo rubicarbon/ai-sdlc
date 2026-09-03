@@ -1,0 +1,52 @@
+# ai-sdlc: environment tiers with a human-gated production stage.
+# The "production" environment carries an Approvals check (configured in Pipelines >
+# Environments by scripts/sdlc-setup-wizard.sh); that approval is the human gate.
+# Runs of this pipeline are what /ai-sdlc:sdlc-metrics-report counts as deployments
+# (azure.deployPipelineName). The repository owns the deploy mechanics in
+# scripts/deploy.sh <environment> <sha>.
+trigger: none
+pr: none
+
+parameters:
+  - name: sha
+    displayName: Commit to deploy (empty = this run's commit)
+    type: string
+    default: ""
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: SDLC_SHA
+    ${{ if ne(parameters.sha, '') }}:
+      value: ${{ parameters.sha }}
+    ${{ else }}:
+      value: $(Build.SourceVersion)
+
+stages:
+  - stage: staging
+    displayName: Deploy to staging (automatic)
+    jobs:
+      - deployment: staging
+        environment: staging
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - script: bash scripts/deploy.sh staging "$(SDLC_SHA)"
+                  displayName: Deploy to staging
+
+  - stage: production
+    displayName: Deploy to production (human approval required)
+    dependsOn: staging
+    jobs:
+      - deployment: production
+        environment: production
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - script: bash scripts/deploy.sh production "$(SDLC_SHA)"
+                  displayName: Deploy to production

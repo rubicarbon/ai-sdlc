@@ -1,0 +1,74 @@
+# ai-sdlc: agent review of every pull request, inside the pipeline, with cost caps.
+# Rendered by /ai-sdlc:sdlc-init for {{REPO_OWNER}}/{{REPO_NAME}} (plugin {{PLUGIN_VERSION}}).
+# The review is advisory: branch protection still requires a human code-owner approval.
+name: sdlc-pr-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+  id-token: write
+
+concurrency:
+  group: sdlc-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Review with Claude Code (ai-sdlc security review + spec compliance)
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          plugin_marketplaces: |
+            https://github.com/{{MARKETPLACE_REPO}}.git
+          plugins: |
+            ai-sdlc@ai-sdlc-kit
+          use_sticky_comment: true
+          track_progress: true
+          claude_args: "--max-turns {{COST_MAX_TURNS}} --max-budget-usd {{COST_MAX_BUDGET_USD}} --allowedTools Read,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git show *)"
+          prompt: |
+            REPO: ${{ github.repository }}  PR: ${{ github.event.pull_request.number }}  BASE: ${{ github.event.pull_request.base.sha }}
+            You are reviewing a pull request in a repository that runs the ai-sdlc loop.
+            1. Load the skill ai-sdlc:sdlc-security-review and read REVIEW.md. Audit `git diff ${{ github.event.pull_request.base.sha }}...HEAD` with the check list; rank Blocking / Important / Nit; respect the nit cap.
+            2. Find the ticket id in the PR title or body; if the spec or ticket is in .sdlc/features/ or .scratch/, list requirements that are missing, partial, or not asked for.
+            3. Post one review comment in the sdlc-security-review report format, then a second section "Spec compliance". End with: "Advisory review by ai-sdlc; a human code owner approves."
+            Do not edit files. Do not approve or request changes through the review API; comment only.
+
+      - name: Record cost and enforce the per-run ceiling
+        if: always() && steps.claude.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          CEILING_USD: "{{COST_MAX_BUDGET_USD}}"
+        run: |
+          cost=$(jq -r '[.[] | select(.type=="result") | .total_cost_usd // 0] | add // 0' "$EXECUTION_FILE")
+          turns=$(jq -r '[.[] | select(.type=="result") | .num_turns // 0] | add // 0' "$EXECUTION_FILE")
+          printf '{"run_id":"%s","pr":%s,"total_cost_usd":%s,"num_turns":%s,"recorded_at":"%s"}\n' \
+            "$GITHUB_RUN_ID" "${{ github.event.pull_request.number }}" "${cost:-0}" "${turns:-0}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > sdlc-cost.json
+          {
+            echo "### ai-sdlc review cost"
+            echo "| Run | Cost (USD) | Turns | Ceiling |"
+            echo "| --- | --- | --- | --- |"
+            echo "| $GITHUB_RUN_ID | $cost | $turns | $CEILING_USD |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          awk -v c="$cost" -v m="$CEILING_USD" 'BEGIN { exit (c+0 > m+0) ? 1 : 0 }' || { echo "::error::review cost $cost USD exceeded the per-run ceiling $CEILING_USD USD"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdlc-cost-${{ github.run_id }}
+          path: sdlc-cost.json
+          retention-days: 90

@@ -1,0 +1,46 @@
+# ai-sdlc: regression-test the SDLC configuration itself.
+# Fails when sdlc.config.json is invalid, when rendered files drifted from the plugin's
+# templates, or when the plugin's own evals (hooks, adapters, shims) fail on Linux.
+name: sdlc-evals
+
+on:
+  pull_request:
+    paths:
+      - "sdlc.config.json"
+      - "CLAUDE.md"
+      - "REVIEW.md"
+      - ".claude/**"
+      - ".github/workflows/sdlc-*.yml"
+      - "docs/agents/**"
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the ai-sdlc plugin ({{PLUGIN_VERSION}})
+        run: |
+          git clone --depth 1 https://github.com/{{MARKETPLACE_REPO}}.git "$RUNNER_TEMP/ai-sdlc-kit"
+          echo "PLUGIN=$RUNNER_TEMP/ai-sdlc-kit/plugins/ai-sdlc" >> "$GITHUB_ENV"
+
+      - name: Validate sdlc.config.json against the schema
+        run: bash "$PLUGIN/scripts/config/validate.sh" sdlc.config.json --schema "$RUNNER_TEMP/ai-sdlc-kit/sdlc.config.schema.json"
+
+      - name: Check rendered files for drift
+        run: bash "$PLUGIN/scripts/init/run.sh" --check --repo-dir "$GITHUB_WORKSPACE"
+
+      - name: Run the plugin's own evals on Linux
+        run: bash "$PLUGIN/evals/run.sh"
+
+      - name: Shell lint
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck >/dev/null
+          shellcheck -S warning "$PLUGIN"/hooks/*.sh "$PLUGIN"/scripts/*.sh "$PLUGIN"/scripts/*/*.sh "$PLUGIN"/scripts/platform/*/*.sh "$PLUGIN"/bin/sdlc-platform

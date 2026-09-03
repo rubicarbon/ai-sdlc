@@ -1,0 +1,1 @@
+{"type":"result","subtype":"success","is_error":false,"duration_ms":184211,"duration_api_ms":151002,"num_turns":18,"result":"Review posted.","session_id":"3b1c1f0e-1111-4a0a-9c1e-000000000001","total_cost_usd":1.42,"usage":{"input_tokens":1200,"cache_creation_input_tokens":80000,"cache_read_input_tokens":410000,"output_tokens":9800}}
