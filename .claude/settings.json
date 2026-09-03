@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/**)",
+      "Edit(~/**)",
+      "Read(//c/Users/**)",
+      "Edit(//c/Users/**)",
+      "Read(//tmp/**)",
+      "Edit(//tmp/**)",
+      "Read(//c/Windows/**)",
+      "Edit(//c/Windows/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files (x86)/**)",
+      "Read(//c/ProgramData/**)",
+      "Read(//d/**)",
+      "Edit(//d/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/guard-repo-boundary.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
