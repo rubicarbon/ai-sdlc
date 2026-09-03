@@ -1,0 +1,43 @@
+{
+  "branch": "main",
+  "policies": [
+    {
+      "kind": "approver-count",
+      "displayName": "Minimum number of reviewers",
+      "settings": {
+        "minimumApproverCount": 1,
+        "creatorVoteCounts": false,
+        "allowDownvotes": false,
+        "resetOnSourcePush": true
+      }
+    },
+    {
+      "kind": "required-reviewer",
+      "displayName": "Required reviewers",
+      "settings": {
+        "requiredReviewerIds": ["lead@contoso.com"],
+        "message": "ai-sdlc: a human code owner must approve every agent-authored change"
+      }
+    },
+    {
+      "kind": "work-item-linking",
+      "displayName": "Work item linking",
+      "settings": {}
+    },
+    {
+      "kind": "comment-required",
+      "displayName": "Comment requirements",
+      "settings": {}
+    },
+    {
+      "kind": "build",
+      "displayName": "Build",
+      "settings": {
+        "pipelineName": "sdlc-pr-review",
+        "queueOnSourceUpdateOnly": true,
+        "manualQueueOnly": false,
+        "validDuration": 720
+      }
+    }
+  ]
+}

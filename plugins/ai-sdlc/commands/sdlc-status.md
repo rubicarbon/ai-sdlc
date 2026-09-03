@@ -1,5 +1,5 @@
 ---
-description: Show whether this repo is an ai-sdlc project, its tier, config validity and the next stage.
+description: "Show whether this repo is an ai-sdlc project, its tier, config validity and the next stage."
 disable-model-invocation: true
 allowed-tools: Bash(test *), Bash(cat sdlc.config.json), Bash(jq *)
 ---

@@ -207,7 +207,11 @@ while IFS= read -r seg; do
       nxt="${toks[$j]:-}"
       [[ "$nxt" =~ ^[A-Za-z0-9_.]+$ ]] && continue
     fi
-    [[ "$t" =~ ^\\[a-zA-Z0-9]$ ]] && continue         # escape sequences like \n \t \0 are not paths
+    # A token starting with a single backslash is an escape sequence (\n, \(, \t\() or a
+    # regex/jq escape, not a path. Only a UNC path (\\server\share) starts with backslashes.
+    if [[ "$t" == \\* ]]; then
+      [[ "$t" =~ ^\\\\[A-Za-z0-9_.$-]+\\ ]] || continue
+    fi
     # path-like?
     if [[ "$t" == /* || "$t" == \\* || "$t" =~ ^[A-Za-z]:([/\\]|$) || "$t" == *[/\\]* || "$t" == '..' || "$t" == '.' ]]; then
       check_path "$t" "$vcwd" "path argument"

@@ -2,6 +2,10 @@
 # _lib.sh — small portable helpers shared by scripts and adapters.
 # POSIX-friendly bash: no GNU-only flags (no `sed -i`, `date -d`, `realpath -m`, `readlink -f`).
 
+# Windows builds of jq end every output line with CRLF. `$(...)` happens to drop the CR,
+# `while read` loops and files do not, so every jq call goes through binary mode there.
+case "${OSTYPE:-}" in msys*|cygwin*|win32*) jq() { command jq -b "$@"; } ;; esac
+
 sdlc_die() {   # sdlc_die [exit-code] message...
   local code=1
   case "${1:-}" in ''|*[!0-9]*) ;; *) code="$1"; shift ;; esac

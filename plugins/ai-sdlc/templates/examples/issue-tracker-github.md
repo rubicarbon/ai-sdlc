@@ -1,0 +1,34 @@
+# Issue tracker: GitHub (via `sdlc-platform`)
+
+Issues and specs for this repo live as GitHub issues in `contoso/usage-digest`. Every operation goes through the `sdlc-platform` contract provided by the `ai-sdlc` plugin, so the same instructions hold on Azure DevOps and so the adapter, not the skill, owns the CLI details. Each call prints one JSON line; read ids and urls from it.
+
+## Conventions
+
+- **Create an issue**: write the Markdown body to a file, then `sdlc-platform work_item_create "<title>" <body-file> --labels <a,b>` (labels are created when missing).
+- **Read an issue**: `sdlc-platform work_item_get <id>`.
+- **Comment on an issue**: `sdlc-platform work_item_comment <id> <body-file>`.
+- **Apply / remove labels, close**: leave to the maintainer or the GitHub UI; comment the intended state change with `work_item_comment`.
+- **Pull requests**: `sdlc-platform pr_create "<title>" <body-file> main <head-branch>`, `sdlc-platform pr_get <id>`, `sdlc-platform pr_comment <id> <body-file>`, `sdlc-platform pr_checks <id>`. Reference the ticket with `Closes #<id>` in the PR body.
+
+## Pull requests as a triage surface
+
+**PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
+
+## When a skill says "publish to the issue tracker"
+
+Create an issue with `sdlc-platform work_item_create`. For a set of tickets with blocking edges, prefer `/ai-sdlc:sdlc-publish <feature-dir>`: it creates them in dependency order, wires native blocking edges (GitHub issue dependencies, with a `Blocked by: #n` body line as fallback) and writes the ids back into the files.
+
+## When a skill says "fetch the relevant ticket"
+
+Run `sdlc-platform work_item_get <id>`.
+
+## Wayfinding operations
+
+Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
+
+- **Map**: `sdlc-platform work_item_create "<map title>" <body-file> --labels wayfinder:map`.
+- **Child ticket**: `sdlc-platform work_item_create "<question>" <body-file> --labels wayfinder:<type> --parent <map-id>` (`research`, `prototype`, `grilling`, `task`); the parent link is a GitHub sub-issue.
+- **Blocking**: `sdlc-platform work_item_link <blocker-id> <ticket-id> --type blocks` (native issue dependency; `"native":false` in the output means the body-line fallback was used). A ticket is unblocked when every blocker is closed.
+- **Frontier query**: open children without an open blocker and without an assignee, first in map order.
+- **Claim**: assign yourself in the GitHub UI (or comment `Claimed by <name>`), the session's first write.
+- **Resolve**: `work_item_comment` with the answer, close the issue, append a context pointer to the map's Decisions-so-far.

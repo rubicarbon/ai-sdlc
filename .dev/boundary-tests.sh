@@ -80,6 +80,9 @@ run 0 Bash "$(j 'printf "%s\n" a b | sort -u' '{command:$v}')"               'pr
 run 0 PowerShell "$(j 'Get-ChildItem .\plugins' '{command:$v}')"             'PS in-repo relative'
 run 0 Bash "$(j 'ls | tr "\n" " "' '{command:$v}')"                          'escape sequence \n is not a path'
 run 2 Bash "$(j 'type \\server\share\x' '{command:$v}')"                     'UNC path still denied'
+run 0 Bash "$(j 'jq -r "\(.key)\t\(.value)" x.json' '{command:$v}')"         'jq string interpolation escapes are not paths'
+run 0 Bash "$(j 'grep -E "a\.b\/c" file.txt' '{command:$v}')"                'regex escapes are not paths'
+run 0 Bash "$(j 'echo $(( (e - s) / 1000000 ))' '{command:$v}')"             'arithmetic division'
 
 echo "== arithmetic false positives (allowed) =="
 run 0 Bash "$(j 'echo $(( (e - s) / 1000000 ))' '{command:$v}')"             'division with spaces'

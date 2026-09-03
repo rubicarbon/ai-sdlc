@@ -1,0 +1,31 @@
+# Release {{RELEASE_VERSION}}
+
+- **Date:** {{RELEASE_DATE}}
+- **Commit:** `{{RELEASE_SHA}}` on `{{REPO_DEFAULT_BRANCH}}`
+- **Authorised by:** {{RELEASE_AUTHORISED_BY}}
+- **Verification report:** {{RELEASE_VERIFY_REPORT}}
+
+## Changes
+
+{{RELEASE_CHANGES}}
+
+## Gates passed
+
+| Gate | Evidence |
+| --- | --- |
+| Verify command | `{{COMMANDS_VERIFY}}` passed in the verifier's fresh context |
+| Code review | {{RELEASE_REVIEW_EVIDENCE}} |
+| Security audit | {{RELEASE_SECURITY_EVIDENCE}} |
+| Human approval | {{RELEASE_APPROVAL_EVIDENCE}} |
+| Checks | {{RELEASE_CHECKS_EVIDENCE}} |
+
+## Rollback rehearsal
+
+- **Previous good release:** {{RELEASE_PREVIOUS}}
+- **Rollback command:** `{{RELEASE_ROLLBACK_COMMAND}}`
+- **Rehearsed on:** {{RELEASE_ROLLBACK_REHEARSED}} (target environment {{RELEASE_ROLLBACK_ENV}})
+- **Data migrations:** {{RELEASE_MIGRATIONS}}
+
+## Watch after release
+
+{{RELEASE_WATCH}}

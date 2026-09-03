@@ -4,6 +4,7 @@
 
 : "${EVAL_NAME:=${0##*/}}"
 EVAL_FAILS=0
+case "${OSTYPE:-}" in msys*|cygwin*|win32*) jq() { command jq -b "$@"; } ;; esac   # Windows jq writes CRLF
 
 _ok()   { printf '  ok    %s\n' "$1"; }
 _fail() { printf '  FAIL  %s\n        %s\n' "$1" "${2:-}"; EVAL_FAILS=$((EVAL_FAILS+1)); }

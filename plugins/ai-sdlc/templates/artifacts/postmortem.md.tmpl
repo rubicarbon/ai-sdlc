@@ -1,0 +1,43 @@
+# Postmortem: {{INCIDENT_TITLE}}
+
+- **Date of incident:** {{INCIDENT_DATE}}
+- **Severity:** {{INCIDENT_SEVERITY}}
+- **Duration (detection to recovery):** {{INCIDENT_DURATION}}
+- **Author:** {{AUTHOR}}, written {{DATE}}
+- **Related:** ticket {{INCIDENT_TICKET}}, release {{INCIDENT_RELEASE}}
+
+This document is blameless. It names systems, decisions and missing signals, never people.
+
+## What happened
+
+{{INCIDENT_SUMMARY}}
+
+## Timeline (UTC)
+
+| Time | Event | Source |
+| --- | --- | --- |
+{{INCIDENT_TIMELINE}}
+
+## Impact
+
+{{INCIDENT_IMPACT}}
+
+## Why it happened
+
+{{INCIDENT_CAUSES}}
+
+## What went well
+
+{{INCIDENT_WENT_WELL}}
+
+## What we change
+
+| Action | Type | Owner | Ticket |
+| --- | --- | --- | --- |
+{{INCIDENT_ACTIONS}}
+
+Action types: **guardrail** (a hook, permission rule or CI check that makes the failure impossible), **verification** (a test or verifier criterion that catches it), **process** (a stage or artifact that was skipped). Prefer guardrails and verification over process.
+
+## Defect escape
+
+Stage where this defect should have been caught: {{INCIDENT_ESCAPED_STAGE}}. Counted in the metrics report as a defect escape for release {{INCIDENT_RELEASE}}.
