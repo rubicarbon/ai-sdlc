@@ -21,7 +21,7 @@ done
 active=$( [ -s "$art/ACTIVE_TICKET" ] && head -n1 "$art/ACTIVE_TICKET" || true)
 fix=$( [ -e "$art/FIX_MODE" ] && echo true || echo false)
 auth=$(ls "$art"/release/AUTHORIZED-* 2>/dev/null | sed 's|.*/AUTHORIZED-||' | jq -R . | jq -cs .)
-features=$(ls -d "$art"/features/*/ 2>/dev/null | xargs -n1 basename 2>/dev/null | jq -R . | jq -cs .)
+features=$(for feature in "$art"/features/*/; do [ -d "$feature" ] && basename "${feature%/}"; done | jq -R . | jq -cs .)
 verify_reports=$(ls "$art"/verify/*.md 2>/dev/null | wc -l | tr -d ' ')
 jq -cn --arg dir "$SDLC_PROJECT_DIR" --argjson valid "$valid" --arg errors "$errors" \
   --arg platform "$(sdlc_config .platform none)" --argjson tier "$(sdlc_config .tier 0)" --arg team "$(sdlc_config .team.mode solo)" --arg verify "$(sdlc_config .commands.verify '')" \

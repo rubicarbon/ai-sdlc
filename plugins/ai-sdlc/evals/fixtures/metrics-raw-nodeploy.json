@@ -1,0 +1,21 @@
+{
+  "platform": "azure",
+  "repo": "contoso/usage-digest",
+  "since": "2026-08-01",
+  "until": "2026-08-31",
+  "exported_at": "2026-09-01T06:00:00Z",
+  "sources": {"prs": "ok", "deployments": "not-configured", "incidents": "ok", "reverts": "ok"},
+  "warnings": ["deployments: no pipeline named sdlc-deploy found; set azure.deployPipelineName or azure.deployPipelineId"],
+  "prs": [
+    {"id": "230", "created_at": "2026-08-01T09:00:00Z", "merged_at": "2026-08-02T11:00:00Z", "first_review_at": "2026-08-01T15:00:00Z", "additions": 220, "deletions": 30, "changed_files": 7, "first_commit_at": "2026-07-30T10:00:00Z", "author": "dev-a", "is_revert": false},
+    {"id": "231", "created_at": "2026-08-01T12:00:00Z", "merged_at": "2026-08-02T11:30:00Z", "first_review_at": "2026-08-02T08:00:00Z", "additions": 90, "deletions": 12, "changed_files": 3, "first_commit_at": "2026-07-31T14:00:00Z", "author": "dev-b", "is_revert": false},
+    {"id": "233", "created_at": "2026-08-03T08:10:00Z", "merged_at": "2026-08-03T08:40:00Z", "first_review_at": "2026-08-03T08:20:00Z", "additions": 30, "deletions": 220, "changed_files": 7, "first_commit_at": "2026-08-03T08:05:00Z", "author": "dev-a", "is_revert": true}
+  ],
+  "deployments": [],
+  "incidents": [
+    {"id": "4711", "opened_at": "2026-08-03T07:40:00Z", "closed_at": "2026-08-03T14:10:00Z", "labels": ["incident"]}
+  ],
+  "reverts": [
+    {"sha": "bbb222bbb222", "committed_at": "2026-08-03T08:40:00Z", "reverts_sha": "aaa111aaa111"}
+  ]
+}

@@ -5,6 +5,7 @@
 #          [--verify CMD] [--format CMD] [--lint CMD] [--envs dev,staging,prod]
 #          [--owner O --name N] [--azure-org URL --azure-project P --azure-repo R]
 #          [--max-turns N --max-budget-usd X --alert-threshold-usd Y]
+#          [--deploy-staging CMD --deploy-production CMD | --no-deploy]
 #          [--yes] [--force] [--upgrade] [--only <path>]... [--check] [--dry-run]
 #
 # First run: builds sdlc.config.json from detect.sh plus flags, validates it against the schema,
@@ -16,6 +17,23 @@
 #   - --check writes nothing and exits 1 when anything drifted (CI)
 #   - --upgrade re-renders template-changed files; user-edited files need --force
 #   - user-edited files are never overwritten without --force
+#   - the recorded hash moves only when the rendered content was installed, upgraded,
+#     overwritten, or already equals the file; template-changed and user-edited keep the
+#     previous record, so a reported template change stays "template-changed" run after run
+#   - --only <path> limits --upgrade / --force and the creation of missing files to the paths
+#     listed; other missing files are reported "missing" and left alone
+#   - --dry-run and --check never touch the tree (not even the artifacts directories)
+# Artifact directories (<artifacts>/features, verify, releases, postmortems, metrics/cost and
+# docs/adr) get one status entry each from tier 1: unchanged (exists), missing (absent under
+# --check / --dry-run) or installed (created with a .gitkeep placeholder; a directory without
+# .gitkeep is fine).
+# Deploy automation (tier 3, platform other than none): the deploy workflow runs
+# commands.deployStaging / commands.deployProduction from sdlc.config.json with SDLC_ENVIRONMENT
+# and SDLC_SHA exported. On init or a re-tier both commands are required (--deploy-staging,
+# --deploy-production) unless --no-deploy skips the deploy template; a plain re-run without
+# them skips the template and says so in next_steps. The production command (exact string and
+# "<command>*") is always added to environments.prod.deployCommandPatterns so the
+# gate-production hook covers it.
 # Output: one JSON summary on stdout; human-readable notes on stderr.
 set -u
 . "${0%/*}/../_root.sh" || exit 2
@@ -25,11 +43,15 @@ RENDER="$SDLC_PLUGIN_ROOT/scripts/init/render.sh"
 
 dir="$PWD"; platform=""; tier=""; team=""; verify=""; format_cmd=""; lint_cmd=""; envs="dev,staging,prod"
 owner=""; name=""; az_org=""; az_project=""; az_repo=""; max_turns=""; max_budget=""; alert=""
-yes=0; force=0; upgrade=0; check=0; dry=0; only=()
+deploy_staging=""; deploy_production=""; no_deploy=0
+force=0; upgrade=0; check=0; dry=0; only=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-dir) dir="$2"; shift 2 ;;
     --only) only+=("${2//\\//}"); shift 2 ;;
+    --deploy-staging) deploy_staging="$2"; shift 2 ;;
+    --deploy-production) deploy_production="$2"; shift 2 ;;
+    --no-deploy) no_deploy=1; shift ;;
     --platform) platform="$2"; shift 2 ;;
     --tier) tier="$2"; shift 2 ;;
     --team) team="$2"; shift 2 ;;
@@ -45,7 +67,7 @@ while [ $# -gt 0 ]; do
     --max-turns) max_turns="$2"; shift 2 ;;
     --max-budget-usd) max_budget="$2"; shift 2 ;;
     --alert-threshold-usd) alert="$2"; shift 2 ;;
-    --yes|--non-interactive) yes=1; shift ;;
+    --yes|--non-interactive) shift ;;
     --force) force=1; shift ;;
     --upgrade) upgrade=1; shift ;;
     --check) check=1; shift ;;
@@ -104,13 +126,15 @@ else
     --arg owner "$owner" --arg name "$name" --arg branch "$(jq -r .defaultBranch <<<"$detected")" \
     --arg lang "$(jq -r .stack.language <<<"$detected")" --arg pm "$(jq -r .stack.packageManager <<<"$detected")" \
     --arg verify "$verify" --arg fmt "$format_cmd" --arg lint "$lint_cmd" --argjson envs "$env_json" \
+    --arg ds "$deploy_staging" --arg dp "$deploy_production" \
     --arg azo "$az_org" --arg azp "$az_project" --arg azr "$az_repo" --arg reuse "$reuse" \
     --arg mt "${max_turns:-40}" --arg mb "${max_budget:-5}" --arg at "${alert:-25}" '
     { "$schema": "https://raw.githubusercontent.com/rubicarbon/ai-sdlc/main/sdlc.config.schema.json",
       version: 1, pluginVersion: $pv, platform: $platform, tier: $tier,
       repo: {owner: $owner, name: $name, defaultBranch: $branch},
       stack: ({language: $lang, packageManager: $pm} | with_entries(select(.value != ""))),
-      commands: ({verify: $verify, format: $fmt, lint: $lint} | with_entries(select(.value != ""))),
+      commands: ({verify: $verify, format: $fmt, lint: $lint, deployStaging: $ds, deployProduction: $dp}
+                 | with_entries(select(.value != ""))),
       environments: $envs,
       team: {mode: $team, enablePluginForTeam: ($team == "team"), codeowners: ("@" + $owner), securityOwners: ("@" + $owner)},
       review: {requiredApprovals: 1, nitCap: 5},
@@ -124,13 +148,48 @@ else
     | if $platform == "none" then del(.github) else . end')
   [ -n "$mp_ver" ] && config=$(jq -c --arg v "$mp_ver" '.reuse.mattpocockSkillsVersion=$v' <<<"$config") && config=$(jq -c 'del(.reuse.mattpocockSkillsVersion)' <<<"$config")
 fi
+# deploy commands: the flags also apply on a re-run (they add or replace the configured ones)
+if [ $mode != init ] && { [ -n "$deploy_staging" ] || [ -n "$deploy_production" ]; }; then
+  config=$(jq -c --arg s "$deploy_staging" --arg p "$deploy_production" '
+    if $s != "" then .commands.deployStaging = $s else . end
+    | if $p != "" then .commands.deployProduction = $p else . end' <<<"$config")
+fi
+# the configured production command is always covered by the production gate: the exact
+# string and "<command>*" join environments.prod.deployCommandPatterns (order kept, no dupes)
+prod_cmd=$(jq -r '.commands.deployProduction // empty' <<<"$config")
+if [ -n "$prod_cmd" ]; then
+  config=$(jq -c --arg c "$prod_cmd" '
+    def addu($x): if any(.[]; . == $x) then . else . + [$x] end;
+    .environments.prod.gate = (.environments.prod.gate // "human")
+    | .environments.prod.deployCommandPatterns =
+        ((.environments.prod.deployCommandPatterns // []) | addu($c) | addu($c + "*"))' <<<"$config")
+fi
 tier=$(jq -r .tier <<<"$config"); platform=$(jq -r .platform <<<"$config"); team=$(jq -r '.team.mode // "solo"' <<<"$config")
 art=$(jq -r '.artifacts.dir // ".sdlc"' <<<"$config")
-cfg_tmp=$(sdlc_tmpfile .json); jq . <<<"$config" >"$cfg_tmp"
-bash "$SDLC_PLUGIN_ROOT/scripts/config/validate.sh" "$cfg_tmp" --quiet || { rm -f "$cfg_tmp"; sdlc_die 1 "the configuration would be invalid; see errors above"; }
 
 primary="$platform"; [ "$primary" = both ] && primary=$(jq -r .platform <<<"$detected"); [ "$primary" = none ] && primary=""
 [ "$platform" = both ] && [ -z "$primary" ] && primary=github
+
+# deploy automation at tier 3: both commands, or an explicit --no-deploy; a plain re-run
+# without them skips the deploy template and reports it in next_steps instead of failing
+render_deploy=0; deploy_omitted=""
+if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
+  have_ds=$(jq -r '.commands.deployStaging // empty' <<<"$config")
+  if [ $no_deploy = 1 ]; then
+    deploy_omitted="--no-deploy was given"
+  elif [ -n "$have_ds" ] && [ -n "$prod_cmd" ]; then
+    render_deploy=1
+  elif [ $mode = rerun ]; then
+    deploy_omitted="commands.deployStaging / commands.deployProduction are not set in sdlc.config.json"
+  else
+    missing_flags=""
+    [ -n "$have_ds" ] || missing_flags="--deploy-staging CMD"
+    [ -n "$prod_cmd" ] || missing_flags="${missing_flags:+$missing_flags }--deploy-production CMD"
+    sdlc_die 2 "run.sh: tier 3 renders the deploy workflow, which runs the commands configured in sdlc.config.json (commands.deployStaging, commands.deployProduction) with SDLC_ENVIRONMENT and SDLC_SHA exported. Pass $missing_flags (for example --deploy-production 'bash scripts/deploy.sh production \"\$SDLC_SHA\"'), or --no-deploy to set up tier 3 without deployment automation."
+  fi
+fi
+cfg_tmp=$(sdlc_tmpfile .json); jq . <<<"$config" >"$cfg_tmp"
+bash "$SDLC_PLUGIN_ROOT/scripts/config/validate.sh" "$cfg_tmp" --quiet || { rm -f "$cfg_tmp"; sdlc_die 1 "the configuration would be invalid; see errors above"; }
 
 # ------------------------------------------------------------------ managed files
 manifest="$art/managed-files.json"
@@ -140,33 +199,50 @@ add_status() { statuses+=("$(jq -cn --arg p "$1" --arg s "$2" --arg t "${3:-}" '
 writes=0
 
 # manage <template> <dest> [extra --var args...]
+# The record in managed-files.json moves to the freshly rendered hash only when that content
+# now is the file (installed, upgraded, overwritten, or already equal). A template-changed or
+# user-edited file keeps its previous record: otherwise the next run would compare the file
+# against a hash it never had and misreport a pending template change as a user edit.
 manage() {
   local tmpl="$1" dest="$2"; shift 2
-  local rendered tmp cur_hash rec_hash new_hash
+  local tmp cur_hash rec_hash new_hash record=0
   tmp=$(sdlc_tmpfile)
   bash "$RENDER" "$T/$tmpl" --config "$cfg_tmp" --out "$tmp" "$@" || { rm -f "$tmp"; sdlc_die 1 "rendering $tmpl failed"; }
   new_hash=$(sdlc_sha256 "$tmp")
   rec_hash=$(jq -r --arg d "$dest" '.[$d].sha256 // empty' <<<"$recorded")
   if [ ! -f "$dest" ]; then
-    if [ $check = 1 ]; then add_status "$dest" missing "$tmpl"; rm -f "$tmp"; return; fi
-    place "$tmp" "$dest"; add_status "$dest" installed "$tmpl"
+    if [ $check = 1 ] || ! only_allows "$dest"; then add_status "$dest" missing "$tmpl"; rm -f "$tmp"; return; fi
+    place "$tmp" "$dest"; add_status "$dest" installed "$tmpl"; record=1
   else
     cur_hash=$(sdlc_sha256 "$dest")
-    if [ "$cur_hash" = "$new_hash" ]; then add_status "$dest" unchanged "$tmpl"; rm -f "$tmp"
+    if [ "$cur_hash" = "$new_hash" ]; then add_status "$dest" unchanged "$tmpl"; rm -f "$tmp"; record=1
     elif [ -n "$rec_hash" ] && [ "$cur_hash" = "$rec_hash" ]; then
       # untouched by the user, but the plugin's template moved on
-      if [ $check = 0 ] && { [ $upgrade = 1 ] || [ $force = 1 ]; } && only_allows "$dest"; then place "$tmp" "$dest"; add_status "$dest" upgraded "$tmpl"
+      if [ $check = 0 ] && { [ $upgrade = 1 ] || [ $force = 1 ]; } && only_allows "$dest"; then
+        place "$tmp" "$dest"; add_status "$dest" upgraded "$tmpl"; record=1
       else add_status "$dest" template-changed "$tmpl"; rm -f "$tmp"; fi
     else
-      if [ $check = 0 ] && [ $force = 1 ] && only_allows "$dest"; then place "$tmp" "$dest"; add_status "$dest" overwritten "$tmpl"
+      if [ $check = 0 ] && [ $force = 1 ] && only_allows "$dest"; then
+        place "$tmp" "$dest"; add_status "$dest" overwritten "$tmpl"; record=1
       else add_status "$dest" user-edited "$tmpl"; rm -f "$tmp"; fi
     fi
   fi
+  [ $record = 1 ] || return 0
   recorded=$(jq -c --arg d "$dest" --arg h "$new_hash" --arg t "$tmpl" '.[$d]={template:$t,sha256:$h}' <<<"$recorded")
 }
 place() { if [ $dry = 1 ]; then rm -f "$1"; return; fi; mkdir -p "$(dirname "$2")"; mv "$1" "$2"; writes=$((writes+1)); }
-# --only <path> (repeatable) limits --upgrade / --force to the listed managed files
+# --only <path> (repeatable) limits --upgrade / --force and the creation of missing files
 only_allows() { [ ${#only[@]} -eq 0 ] && return 0; local o; for o in "${only[@]}"; do [ "$o" = "$1" ] && return 0; done; return 1; }
+
+# artifact_dir <dir>: one status per artifact directory. .gitkeep is only a placeholder so the
+# directory survives in git; a directory that exists without it is "unchanged".
+artifact_dir() {
+  local d="$1"
+  if [ -d "$d" ]; then add_status "$d/" unchanged ""; return; fi
+  if [ $check = 1 ] || [ $dry = 1 ]; then add_status "$d/" missing ""; return; fi
+  mkdir -p "$d" && : >"$d/.gitkeep" || sdlc_die 1 "cannot create $d"
+  writes=$((writes+1)); add_status "$d/" installed ""
+}
 
 # create_once <template> <dest>: rendered on first run, then owned by the user (never compared)
 create_once() {
@@ -242,21 +318,24 @@ gitignore_lines
 if [ "$tier" -ge 1 ]; then
   manage REVIEW.md.tmpl REVIEW.md --var "REVIEW_NIT_CAP=$(jq -r '.review.nitCap // 5' <<<"$config")"
   if [ -n "$primary" ]; then manage "agents/issue-tracker-$primary.md.tmpl" docs/agents/issue-tracker.md; fi
-  for d in features verify releases postmortems metrics/cost; do
-    [ -d "$art/$d" ] || { [ $check = 1 ] || [ $dry = 1 ] || mkdir -p "$art/$d"; }
-    [ -f "$art/$d/.gitkeep" ] || { [ $check = 1 ] || [ $dry = 1 ] || : >"$art/$d/.gitkeep"; }
-  done
-  [ -d docs/adr ] || { [ $check = 1 ] || [ $dry = 1 ] || { mkdir -p docs/adr; : >docs/adr/.gitkeep; }; }
+  for d in features verify releases postmortems metrics/cost; do artifact_dir "$art/$d"; done
+  artifact_dir docs/adr
 fi
 if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
   for p in $( [ "$platform" = both ] && echo "github azure" || echo "$primary" ); do
     case "$p" in
       github)
-        for w in "$T"/github/workflows/*.yml; do manage "github/workflows/${w##*/}" ".github/workflows/${w##*/}"; done
+        for w in "$T"/github/workflows/*.yml; do
+          [ "${w##*/}" = sdlc-deploy.yml ] && [ $render_deploy = 0 ] && continue
+          manage "github/workflows/${w##*/}" ".github/workflows/${w##*/}"
+        done
         manage github/PULL_REQUEST_TEMPLATE.md .github/PULL_REQUEST_TEMPLATE.md
         manage github/CODEOWNERS.tmpl .github/CODEOWNERS ;;
       azure)
-        for w in "$T"/azure/pipelines/*.yml; do manage "azure/pipelines/${w##*/}" ".azuredevops/pipelines/${w##*/}"; done
+        for w in "$T"/azure/pipelines/*.yml; do
+          [ "${w##*/}" = sdlc-deploy.yml ] && [ $render_deploy = 0 ] && continue
+          manage "azure/pipelines/${w##*/}" ".azuredevops/pipelines/${w##*/}"
+        done
         manage azure/pull_request_template.md .azuredevops/pull_request_template.md
         manage azure/branch-policies.json .azuredevops/branch-policies.json --var "REVIEW_REQUIRED_APPROVALS=$(jq -r '.review.requiredApprovals // 1' <<<"$config")" --var "AZURE_PIPELINE_NAME=$(jq -r '.azure.pipelineName // "sdlc-pr-review"' <<<"$config")" ;;
     esac
@@ -292,7 +371,12 @@ esac
 [ "$tier" -ge 2 ] && [ -n "$primary" ] && steps+=("Protect the default branch (human approval required to merge): sdlc-platform branch_protect_apply $(jq -r '.repo.defaultBranch // "main"' <<<"$config")")
 if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
   steps+=("Commit the CI files, then register them: sdlc-platform ci_workflow_install")
-  steps+=("Create scripts/deploy.sh <environment> <sha> (the deploy workflow calls it) and the CI secret ANTHROPIC_API_KEY plus the production approval rule: run the setup wizard /ai-sdlc:sdlc-init generates (scripts/sdlc-setup-wizard.sh).")
+  steps+=("Create the CI secret ANTHROPIC_API_KEY and the production approval rule (GitHub environment 'production' with required reviewers, or the Azure environment's Approvals check): see docs/PLATFORM-SETUP.md.")
+  if [ $render_deploy = 1 ]; then
+    steps+=("The deploy workflow runs commands.deployStaging and commands.deployProduction from sdlc.config.json with SDLC_ENVIRONMENT and SDLC_SHA exported; the production command is covered by the gate-production hook (environments.prod.deployCommandPatterns).")
+  else
+    steps+=("Deployment automation was omitted ($deploy_omitted): no deploy workflow was rendered. To add it, re-run with --deploy-staging CMD --deploy-production CMD (SDLC_ENVIRONMENT and SDLC_SHA are exported to the commands).")
+  fi
 fi
 [ "$team" = team ] && steps+=("Commit .claude/settings.json: teammates get ai-sdlc and mattpocock-skills enabled automatically.")
 steps+=("Commit the rendered files.")
@@ -313,6 +397,6 @@ if [ $check = 1 ]; then
   [ "$n_pending" -eq 0 ] && exit 0
   jq -r '.[] | "ai-sdlc: \(.status): \(.path)"' <<<"$pending" >&2; exit 1
 fi
-[ "$n_pending" -gt 0 ] && jq -r '.[] | "ai-sdlc: \(.status): \(.path) (re-run with --upgrade to apply the template change)"' <<<"$pending" >&2
+[ "$n_pending" -gt 0 ] && jq -r '.[] | "ai-sdlc: \(.status): \(.path) " + (if .status == "template-changed" then "(re-run with --upgrade to apply the template change)" else "(created by a run without --check / --dry-run" + (if .template != "" then ", subject to --only" else "" end) + ")" end)' <<<"$pending" >&2
 [ "$(jq length <<<"$user_edited")" -gt 0 ] && jq -r '.[] | "ai-sdlc: user-edited: \(.path) (kept; --force overwrites)"' <<<"$user_edited" >&2
 exit 0

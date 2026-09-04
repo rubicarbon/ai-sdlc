@@ -7,13 +7,13 @@
 # contract function through bin/sdlc-platform, checks exit codes and stdout shapes,
 # then diffs the normalised key sets between platforms. Exit 1 on any divergence.
 set -u
-here=$(CDPATH= cd -- "${0%/*}" && pwd -P)
+here=$(CDPATH='' cd -- "${0%/*}" && pwd -P)
 . "$here/../_root.sh" || exit 2
 BIN="$SDLC_PLUGIN_ROOT/bin/sdlc-platform"
 want="all"; keep=0
 while [ $# -gt 0 ]; do case "$1" in --platform) want="$2"; shift 2 ;; --keep) keep=1; shift ;; *) shift ;; esac; done
 scratch="${EVAL_TMP:-${SDLC_CONFORMANCE_SCRATCH:-$SDLC_PLUGIN_ROOT/../../.dev/scratch/conformance}}"
-mkdir -p "$scratch"; scratch=$(CDPATH= cd -- "$scratch" && pwd -P)
+mkdir -p "$scratch"; scratch=$(CDPATH='' cd -- "$scratch" && pwd -P)
 fails=0; checks=0
 ok()   { checks=$((checks+1)); printf '  ok    [%s] %s\n' "$1" "$2"; }
 bad()  { checks=$((checks+1)); fails=$((fails+1)); printf '  FAIL  [%s] %s\n        %s\n' "$1" "$2" "${3:-}"; }
@@ -36,7 +36,8 @@ shape() {
 keys_of() { printf '%s' "$1" | jq -c '[paths | map(select(type=="string"))] | unique | map(select(length>0))'; }
 
 setup_repo() {
-  local p="$1" d="$scratch/$p"
+  local p="$1"
+  local d="$scratch/$p"
   rm -rf "$d"; mkdir -p "$d/state" "$d/repo"
   git -C "$d/repo" init -q -b main
   git -C "$d/repo" config user.email conf@example.com; git -C "$d/repo" config user.name conformance; git -C "$d/repo" config core.autocrlf false
@@ -50,7 +51,7 @@ setup_repo() {
   "repo": {"owner": "mock-org", "name": "mock-repo", "defaultBranch": "main"},
   "review": {"requiredApprovals": 1},
   "github": {"requiredChecks": ["ci", "lint"], "deployWorkflow": "sdlc-deploy.yml"},
-  "azure": {"organization": "https://dev.azure.com/mock-org", "project": "mock-proj", "repo": "mock-repo", "workItemType": "User Story", "requiredReviewers": ["lead@example.com"], "pipelineName": "sdlc-mock", "deployPipelineName": "sdlc-mock"},
+  "azure": {"organization": "https://dev.azure.com/mock-org", "project": "mock-proj", "repo": "mock-repo", "workItemType": "User Story", "requiredReviewers": ["lead@example.com"], "pipelineName": "sdlc-pr-review", "deployPipelineName": "sdlc-mock"},
   "metrics": {"incidentLabel": "incident"},
   "artifacts": {"dir": ".sdlc"}
 }
@@ -61,7 +62,8 @@ JSON
 }
 
 run_platform() {
-  local p="$1" d="$scratch/$p"
+  local p="$1"
+  local d="$scratch/$p"
   setup_repo "$p"
   cd "$d/repo" || exit 1
   export SDLC_CI_TEMPLATES_DIR="$SDLC_PLUGIN_ROOT/scripts/platform/_mocks/templates"
@@ -107,20 +109,28 @@ run_platform() {
   shape "$p" "pr_comment shape" '.id=="'"$PR_ID"'" and has("comment_id")'
   SHAPE_PR_COMMENT=$(keys_of "$OUT")
 
+  # pr_checks never passes with zero checks: pass, fail, pending, empty and skipped-only
+  # must give the same status, reason and exit code on every platform.
   expect "$p" 0 "pr_checks pass" -- pr_checks "$PR_ID"
-  shape "$p" "pr_checks pass shape" '.status=="pass" and (.checks|type=="array" and length>0) and (.checks[0]|has("name") and has("status") and has("url"))'
+  shape "$p" "pr_checks pass shape" '.status=="pass" and .reason==null and (.required|type=="array" and length>0) and (.checks|type=="array" and length>0) and (.checks[0]|has("name") and has("status") and has("url"))'
   SHAPE_CHECKS=$(keys_of "$OUT")
   SDLC_MOCK_CHECKS=fail    expect "$p" 1 "pr_checks fail exits 1" -- pr_checks "$PR_ID"
-  shape "$p" "pr_checks fail status" '.status=="fail"'
+  shape "$p" "pr_checks fail status and reason" '.status=="fail" and (.reason|type=="string" and test("failing checks"))'
   SDLC_MOCK_CHECKS=pending expect "$p" 8 "pr_checks pending exits 8" -- pr_checks "$PR_ID"
-  shape "$p" "pr_checks pending status" '.status=="pending"'
+  shape "$p" "pr_checks pending status and reason" '.status=="pending" and (.reason|type=="string" and test("pending"))'
+  SDLC_MOCK_CHECKS=empty   expect "$p" 1 "pr_checks with zero checks exits 1 (fail closed)" -- pr_checks "$PR_ID"
+  shape "$p" "pr_checks empty status and reason" '.status=="fail" and (.checks|length)==0 and (.reason|type=="string" and test("no checks reported"))'
+  SDLC_MOCK_CHECKS=skipped expect "$p" 1 "pr_checks with only skipped checks exits 1" -- pr_checks "$PR_ID"
+  shape "$p" "pr_checks skipped-only status and reason" '.status=="fail" and all(.checks[]; .status=="skipped") and (.reason|type=="string" and test("skipped"))'
+  SHAPE_CHECKS_SKIPPED=$(keys_of "$OUT")
+  [ "$SHAPE_CHECKS" = "$SHAPE_CHECKS_SKIPPED" ] && ok "$p" "pr_checks key set is stable across verdicts" || bad "$p" "pr_checks key set differs between pass and fail" "$SHAPE_CHECKS vs $SHAPE_CHECKS_SKIPPED"
 
   expect "$p" 0 "branch_protect_apply first run" -- branch_protect_apply main
-  shape "$p" "branch_protect_apply shape" '.branch=="main" and (.applied|type=="array") and (.unchanged|type=="array")'
-  shape "$p" "branch_protect_apply first run applies something" '(.applied|length)>0'
+  shape "$p" "branch_protect_apply shape" '.branch=="main" and (.applied|type=="array") and (.updated|type=="array") and (.unchanged|type=="array") and (.skipped|type=="array")'
+  shape "$p" "branch_protect_apply first run applies something" '(.applied|length)>0 and (.updated|length)==0'
   SHAPE_PROTECT=$(keys_of "$OUT")
   expect "$p" 0 "branch_protect_apply second run" -- branch_protect_apply main
-  shape "$p" "branch_protect_apply second run is a no-op" '(.applied|length)==0 and (.unchanged|length)>0'
+  shape "$p" "branch_protect_apply second run is a no-op" '(.applied|length)==0 and (.updated|length)==0 and (.unchanged|length)>0'
 
   expect "$p" 0 "ci_workflow_install first run" -- ci_workflow_install
   shape "$p" "ci_workflow_install shape" '(.installed|type=="array") and (.unchanged|type=="array") and (.pending|type=="array") and (.registered|type=="array")'
@@ -132,9 +142,16 @@ run_platform() {
   [ -n "$ci_file" ] && ! grep -q '{{' "$ci_file" && ok "$p" "rendered CI file has no unresolved markers" || bad "$p" "rendered CI file" "${ci_file:-none}"
 
   expect "$p" 0 "metrics_export" -- metrics_export 2026-08-01 2099-12-31 "$d/metrics.json"
-  shape "$p" "metrics_export summary shape" '(.prs|type=="number") and (.deployments|type=="number") and (.incidents|type=="number") and (.reverts|type=="number") and (.out|type=="string")'
+  shape "$p" "metrics_export summary shape" '(.prs|type=="number") and (.deployments|type=="number") and (.incidents|type=="number") and (.reverts|type=="number") and (.out|type=="string") and (.warnings|type=="array")'
   SHAPE_METRICS=$(keys_of "$OUT")
   if jq -e '(.prs|type=="array") and (.deployments|type=="array") and (.incidents|type=="array") and (.reverts|type=="array") and (.deployments|length>=1) and (.prs[0]|has("id") and has("created_at") and has("merged_at") and has("first_review_at") and has("additions") and has("deletions") and has("changed_files") and has("first_commit_at") and has("author") and has("is_revert")) and (.deployments[0]|has("id") and has("environment") and has("started_at") and has("finished_at") and has("status") and has("sha")) and (.incidents[0]|has("id") and has("opened_at") and has("closed_at") and has("labels")) and (.reverts|length>=1)' "$d/metrics.json" >/dev/null 2>&1; then ok "$p" "metrics file schema"; else bad "$p" "metrics file schema" "$(head -c 400 "$d/metrics.json")"; fi
+  if jq -e '(.sources|type=="object") and (.sources.prs=="configured") and (.sources.deployments=="configured") and (.sources.incidents=="configured") and (.sources.reverts|IN("configured","partial")) and (.warnings|type=="array") and all(.warnings[]; type=="string")' "$d/metrics.json" >/dev/null 2>&1; then ok "$p" "metrics file names its sources and warnings"; else bad "$p" "metrics file sources/warnings" "$(jq -c '{sources,warnings}' "$d/metrics.json" 2>/dev/null | head -c 400)"; fi
+  # a failing CLI call is an error with no output file, never an empty export
+  rm -f "$d/metrics-fail.json"
+  case "$p" in github) failcmd="pr list" ;; *) failcmd="repos pr list" ;; esac
+  SDLC_MOCK_FAIL="$failcmd" expect "$p" 1 "metrics_export fails when the PR query fails" -- metrics_export 2026-08-01 2099-12-31 "$d/metrics-fail.json"
+  [ ! -e "$d/metrics-fail.json" ] && ok "$p" "metrics_export writes no file on failure" || bad "$p" "metrics_export wrote a file on failure" "$d/metrics-fail.json"
+  [[ "$ERR" =~ ai-sdlc:.*failed\ \(exit\ 1\) ]] && ok "$p" "metrics_export failure names the command and exit code" || bad "$p" "metrics_export failure message" "$ERR"
   SHAPE_METRICS_FILE=$(jq -c '[paths | map(select(type=="string"))] | unique | map(select(length>0 and .[0]!="repo" and .[0]!="platform" and .[0]!="exported_at"))' "$d/metrics.json")
 
   expect "$p" 3 "unsupported function on 'none'" -- --platform none pr_get 1

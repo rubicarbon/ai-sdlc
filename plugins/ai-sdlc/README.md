@@ -44,8 +44,8 @@ Claude Code plugin that turns a software project into an AI-native SDLC workspac
 
 | Agent | Does |
 | --- | --- |
-| `sdlc-verifier` | Fresh-context verifier: runs the verify command and the acceptance criteria, reports with evidence; read-only by hook |
-| `sdlc-security-auditor` | Ranks security findings in a diff per `REVIEW.md`; read-only by hook |
+| `sdlc-verifier` | Fresh-context verifier: runs the verify command in a disposable worktree (`scripts/verify/run-isolated.sh`) and checks the acceptance criteria, reports with evidence; shell limited to a read-only allowlist by hook |
+| `sdlc-security-auditor` | Ranks security findings in a diff per `REVIEW.md`; same read-only allowlist by hook |
 | `sdlc-metrics-analyst` | Turns metrics files into a short narrative with sample sizes |
 
 ### Hooks (`hooks/hooks.json`)
@@ -54,9 +54,9 @@ Claude Code plugin that turns a software project into an AI-native SDLC workspac
 | --- | --- | --- |
 | `guard-secrets` | PreToolUse | Denies access to secret files and credential directories |
 | `guard-protected-paths` | PreToolUse | Denies edits to protected paths unless `.sdlc/UNLOCK_PROTECTED` exists |
-| `guard-verifier-readonly` | PreToolUse | Denies edits and write-shaped commands from the verifier and auditor agents |
-| `guard-test-edits` | PreToolUse | Denies test edits while `.sdlc/FIX_MODE` exists |
-| `guard-ticket-gate` | PreToolUse | Denies source edits without `.sdlc/ACTIVE_TICKET` when `guardrails.requireTicket` is on |
+| `guard-verifier-readonly` | PreToolUse | Denies edits from the verifier and auditor agents and limits their shell to read-only commands plus the isolation helper |
+| `guard-test-edits` | PreToolUse | Denies test changes (file tools and shell) while `.sdlc/FIX_MODE` exists |
+| `guard-ticket-gate` | PreToolUse | Denies source changes (file tools and shell) without `.sdlc/ACTIVE_TICKET` when `guardrails.requireTicket` is on |
 | `gate-production` | PreToolUse | Denies production commands without a fresh `.sdlc/release/AUTHORIZED-<sha>` |
 | `post-edit-verify` | PostToolUse | Runs the configured formatter and linter on the edited file |
 

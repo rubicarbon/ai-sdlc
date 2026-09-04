@@ -1,6 +1,9 @@
 # ai-sdlc: agent review of every pull request, inside the pipeline, with cost caps.
 # Rendered by /ai-sdlc:sdlc-init for {{REPO_OWNER}}/{{REPO_NAME}} (plugin {{PLUGIN_VERSION}}).
-# The review is advisory: branch protection still requires a human code-owner approval.
+# The review is advisory: branch protection still requires a human code-owner approval. The
+# job fails closed: when the action leaves no execution file, or its result entry reports an
+# error or an exhausted cap (subtype other than "success"), the required check fails instead
+# of passing without a review.
 name: sdlc-pr-review
 
 on:
@@ -47,6 +50,22 @@ jobs:
             2. Find the ticket id in the PR title or body; if the spec or ticket is in .sdlc/features/ or .scratch/, list requirements that are missing, partial, or not asked for.
             3. Post one review comment in the sdlc-security-review report format, then a second section "Spec compliance". End with: "Advisory review by ai-sdlc; a human code owner approves."
             Do not edit files. Do not approve or request changes through the review API; comment only.
+
+      - name: Fail the job when the review did not complete
+        if: always()
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          if [ -z "$EXECUTION_FILE" ] || [ ! -s "$EXECUTION_FILE" ]; then
+            echo "::error::ai-sdlc review FAILED (no review result): the action left no execution file, so the pull request was not reviewed"
+            exit 1
+          fi
+          subtype=$(jq -r '[.[] | select(.type=="result")] | last | if . == null then "missing" else (.subtype // "missing") end' "$EXECUTION_FILE")
+          is_error=$(jq -r '[.[] | select(.type=="result")] | last | if . == null or .is_error == null then true else .is_error end' "$EXECUTION_FILE")
+          if [ "$is_error" != false ] || [ "$subtype" != success ]; then
+            echo "::error::ai-sdlc review FAILED (no review result): result subtype '$subtype', is_error '$is_error'. An exhausted cap (error_max_turns, error_max_budget_usd) or an error means the pull request was not reviewed; re-run, or raise cost.maxTurns / cost.maxBudgetUsd in sdlc.config.json."
+            exit 1
+          fi
 
       - name: Record cost and enforce the per-run ceiling
         if: always() && steps.claude.outputs.execution_file != ''

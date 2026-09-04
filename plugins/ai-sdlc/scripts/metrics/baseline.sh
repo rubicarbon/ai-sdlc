@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 today=$(sdlc_today)
-[ -n "$since" ] || since=$($py -c 'import datetime,sys; print((datetime.date.fromisoformat(sys.argv[1]) - datetime.timedelta(days=90)).isoformat())' "$today")
+[ -n "$since" ] || since=$($py -B -c 'import datetime,sys; print((datetime.date.fromisoformat(sys.argv[1]) - datetime.timedelta(days=90)).isoformat())' "$today")
 art=$(sdlc_artifacts_dir)
 
 reasons=()
@@ -47,7 +47,8 @@ if [ $force = 1 ] && [ ${#reasons[@]} -gt 0 ]; then
   jq -c --arg note "LATE BASELINE: captured after the loop was installed ($(IFS=';'; echo "${reasons[*]}"))" '.note=$note' "$raw" >"$raw.tmp" && mv "$raw.tmp" "$raw"
   echo "ai-sdlc: WARNING: this is a late baseline; the report and the file say so." >&2
 fi
-$py "$SDLC_PLUGIN_ROOT/scripts/metrics/report.py" "$raw" --out "$report" >/dev/null || sdlc_die 1 "report.py failed"
+# -B: never write __pycache__ into the plugin directory
+$py -B "$SDLC_PLUGIN_ROOT/scripts/metrics/report.py" "$raw" --out "$report" >/dev/null || sdlc_die 1 "report.py failed"
 if [ $force = 1 ] && [ ${#reasons[@]} -gt 0 ]; then
   printf '\n> **Late baseline.** Captured after the loop was installed; treat it as a first period, not as the pre-adoption state.\n' >>"$report"
 fi

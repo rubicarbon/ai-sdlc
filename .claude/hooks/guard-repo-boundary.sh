@@ -100,6 +100,7 @@ check_path() {
   local raw="$1" vcwd="$2" label="$3" p
   R_PATH="$vcwd"
   [ -z "$raw" ] && return 0
+  # shellcheck disable=SC2088 # These patterns intentionally match a literal tilde input.
   case "$raw" in
     '~'|'~/'*|'~\'*) deny "$label '$raw' references the home directory" ;;
   esac
@@ -125,6 +126,7 @@ else
 fi
 
 # --- file tools ---
+# shellcheck disable=SC2154 # jq assigns these values from the hook payload.
 case "$tool" in
   Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep)
     check_path "$fp" "$ncwd" "file_path"

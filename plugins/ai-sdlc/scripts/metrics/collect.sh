@@ -25,7 +25,7 @@ done
 [ -n "$until" ] || until=$(sdlc_today)
 if [ -z "$since" ]; then
   # 30 days back without GNU date -d: python is already required
-  since=$($py -c 'import datetime,sys; print((datetime.date.fromisoformat(sys.argv[1]) - datetime.timedelta(days=30)).isoformat())' "$until")
+  since=$($py -B -c 'import datetime,sys; print((datetime.date.fromisoformat(sys.argv[1]) - datetime.timedelta(days=30)).isoformat())' "$until")
 fi
 art=$(sdlc_artifacts_dir); mkdir -p "$art/metrics/cost"
 raw="$art/metrics/raw-${since}_${until}.json"; report="$art/metrics/report-${since}_${until}.md"
@@ -34,5 +34,6 @@ raw="$art/metrics/raw-${since}_${until}.json"; report="$art/metrics/report-${sin
 if [ -z "$baseline" ]; then baseline=$(ls -t "$art"/metrics/baseline-*.json 2>/dev/null | head -n1 || true); fi
 args=("$raw" --cost-dir "$art/metrics/cost" --out "$report")
 [ -n "$baseline" ] && [ -f "$baseline" ] && args+=(--baseline "$baseline")
-$py "$SDLC_PLUGIN_ROOT/scripts/metrics/report.py" "${args[@]}" >/dev/null || sdlc_die 1 "report.py failed"
+# -B: never write __pycache__ into the plugin directory
+$py -B "$SDLC_PLUGIN_ROOT/scripts/metrics/report.py" "${args[@]}" >/dev/null || sdlc_die 1 "report.py failed"
 jq -cn --arg raw "$raw" --arg report "$report" --arg baseline "${baseline:-}" '{raw:$raw,report:$report,baseline:(if $baseline=="" then null else $baseline end)}'

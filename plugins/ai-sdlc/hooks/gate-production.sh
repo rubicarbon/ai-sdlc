@@ -30,15 +30,17 @@ for p in "${patterns[@]}"; do
 done
 [ -n "$matched" ] || exit 0
 
+# The marker is validated by scripts/ship/_authz.sh, the same rules preflight.sh applies: every
+# field present exactly once, a numeric expiry in the future, and a full sha equal to HEAD and
+# to the file name. Anything the validator cannot read denies.
+. "$SDLC_PLUGIN_ROOT/scripts/ship/_authz.sh"
 sha=$(git -C "$HOOK_PROJECT" rev-parse HEAD 2>/dev/null || echo unknown)
 marker="$HOOK_ARTIFACTS/release/AUTHORIZED-$sha"
 rel_marker=$(hook_rel "$marker")
 if [ ! -f "$marker" ]; then
   hook_deny "'$HOOK_CMD' matches the production pattern '$matched' and there is no release authorisation for commit ${sha:0:12}. Run /ai-sdlc:sdlc-ship: a human must authorise the release, which writes $rel_marker."
 fi
-expires=$(sed -n 's/^expires=//p' "$marker" | head -n1)
-now=$(date +%s)
-if [ -n "$expires" ] && [ "$now" -gt "$expires" ] 2>/dev/null; then
-  hook_deny "release authorisation $rel_marker expired $(( (now - expires) / 60 )) minutes ago. Ask the human to re-authorise through /ai-sdlc:sdlc-ship."
+if ! reason=$(sdlc_check_authorization "$marker" "$sha"); then
+  hook_deny "'$HOOK_CMD' matches the production pattern '$matched' and $reason ($rel_marker). Ask the human to re-authorise through /ai-sdlc:sdlc-ship."
 fi
 exit 0

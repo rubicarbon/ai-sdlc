@@ -30,7 +30,7 @@ Exit 0 means the stage may start; exit 2 prints the missing artifact and the com
 | 4 | Publish | local spec + tickets, platform is github or azure | `/ai-sdlc:sdlc-publish <feature-dir>` | tracker ids written back, `publish-manifest.json` |
 | 5 | Build | `precondition.sh build` exit 0; one unblocked ticket | write `.sdlc/ACTIVE_TICKET` (see below); on a branch, human types `/mattpocock-skills:implement`; drive `tdd` at the agreed seams | commits referencing the ticket id |
 | 6 | Review | a diff since the branch point | `mattpocock-skills:code-review` (Skill tool) | review notes on the PR or in the ticket |
-| 7 | Verify | review done | `/ai-sdlc:sdlc-verify` runs the `sdlc-verifier` subagent in a fresh context: it runs the software, never edits it | `.sdlc/verify/<date>-<sha>.md` with a Verdict line |
+| 7 | Verify | review done | `/ai-sdlc:sdlc-verify` runs the `sdlc-verifier` subagent in a fresh context: it runs `commands.verify` in a disposable worktree, never edits anything | `.sdlc/verify/<date>-<sha>.md` with Verdict and Commit lines bound to HEAD (re-verify after every new commit) |
 | 8 | Security | verify report | `sdlc-security-auditor` subagent over the diff, ranked per `REVIEW.md` | findings on the PR |
 | 9 | PR | verify PASS, findings addressed | `sdlc-platform pr_create <title> <body-file> <base> <head>`; a human code owner approves | the PR |
 | 10 | Ship | approved PR, `pr_checks` pass | `/ai-sdlc:sdlc-ship` (release notes, rollback rehearsal, human release authorisation) | `.sdlc/releases/<version>.md`, `.sdlc/release/AUTHORIZED-<sha>` |

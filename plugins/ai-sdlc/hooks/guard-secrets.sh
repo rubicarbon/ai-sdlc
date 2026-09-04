@@ -9,6 +9,7 @@ set -u
 . "$SDLC_PLUGIN_ROOT/scripts/_hook.sh"
 
 defaults=(".env" ".env.*" "secrets/**" "**/*.pem" "**/id_rsa*" "**/id_ed25519*" "**/*.p12" "**/*.pfx" "**/credentials.json" "**/service-account*.json")
+# shellcheck disable=SC2088 # These are literal user-facing tilde patterns, expanded by is_secret.
 home_defaults=("~/.ssh/**" "~/.aws/**" "~/.azure/**" "~/.config/gh/**" "~/.kube/config" "~/.netrc" "~/.npmrc" "~/.docker/config.json")
 mapfile -t patterns < <(hook_list '.guardrails.secretPaths' "${defaults[@]}")
 home=$(hook_home)

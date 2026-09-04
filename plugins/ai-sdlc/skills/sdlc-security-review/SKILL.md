@@ -24,6 +24,7 @@ The list is short on purpose: these are the defects that recur in agent-written 
 
 ```
 # Security review: <PR or branch> against <base>
+**Commit:** <sha>  **Base:** <base>
 
 Blocking: <n>  Important: <n>  Nit: <n> (cap <cap>)
 
@@ -44,6 +45,8 @@ Blocking: <n>  Important: <n>  Nit: <n> (cap <cap>)
 
 Findings are advisory; a human code owner approves the merge.
 ```
+
+The `**Commit:**` line names the full sha of the HEAD that was reviewed; the ship stage rejects a security report whose commit is not the current HEAD, so the review is repeated after every new commit. The `Blocking: <n>` summary line appears exactly once, with a number: the ship gate refuses to read a report without it, with two of them, or with a non-numeric count, and never treats an unreadable report as zero findings. `scripts/loop/validate-report.sh <file> --security` checks a saved report against these rules.
 
 ## Ranking rules
 

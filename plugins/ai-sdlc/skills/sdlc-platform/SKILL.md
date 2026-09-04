@@ -25,10 +25,10 @@ sdlc-platform --platform azure <function> ... # override detection (config "both
 | `pr_create <title> <body.md> <base> <head> [--draft]` | `{"id","url"}` |
 | `pr_get <id>` | `{"id","title","state":"open|merged|closed","base","head","url","created_at","merged_at","additions","deletions","changed_files","review_decision","author"}` |
 | `pr_comment <id> <body.md>` | `{"id","comment_id"}` |
-| `pr_checks <id>` | `{"id","status":"pass|fail|pending","checks":[...]}`; exit 1 fail, 8 pending |
-| `branch_protect_apply <branch>` | `{"branch","applied":[],"unchanged":[],"skipped":[]}` (idempotent) |
+| `pr_checks <id>` | `{"id","status":"pass|fail|pending","checks":[...],"required":[...],"reason":null|"..."}`; exit 0 only when at least one check passed, none failed or is pending, and every required check (GitHub `github.requiredChecks`, Azure the `azure.pipelineName` build policy) passed; exit 8 while a check is pending; exit 1 on a failure, an empty check list, a missing or skipped required check, or a skipped-only list (`reason` says which) |
+| `branch_protect_apply <branch>` | `{"branch","applied":[],"updated":[],"unchanged":[],"skipped":[]}` (idempotent; `updated` lists policies whose managed settings drifted and were reconciled) |
 | `ci_workflow_install [--force]` | `{"installed":[],"unchanged":[],"pending":[],"registered":[]}` (idempotent) |
-| `metrics_export <since> <until> <out.json>` | counts, and the normalised file at `out.json` |
+| `metrics_export <since> <until> <out.json>` | counts plus `warnings`, and the normalised file at `out.json` (with `sources` and `warnings`); a CLI or API failure is exit 1 with the failing command named, never an empty export |
 
 Bodies are always files: write the Markdown to a file first (for example under `.sdlc/tmp/`), pass the path, delete it afterwards. Quotes and newlines survive that way.
 

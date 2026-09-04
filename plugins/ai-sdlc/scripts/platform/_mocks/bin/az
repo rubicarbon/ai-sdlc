@@ -1,10 +1,28 @@
 #!/usr/bin/env bash
 # Mock Azure CLI for conformance tests and --dry-run. Answers the subset of `az`
 # the Azure adapter uses, keeps state under $SDLC_MOCK_STATE, logs every call.
+#
+# Knobs (environment):
+#   SDLC_MOCK_CHECKS=pass|fail|pending|empty|skipped   what `repos pr policy list` reports
+#   SDLC_MOCK_PR_REVIEWERS='[{"vote":10,"uniqueName":"a@x"}]'  reviewers of `repos pr show`
+#   SDLC_MOCK_FAIL="<subcommand prefix>"      e.g. "repos pr list": print an error, exit 1
+#   SDLC_MOCK_MALFORMED="<subcommand prefix>" print "{not json" and exit 0
+#   SDLC_MOCK_EMPTY="<subcommand prefix>"     print [] (or {"value":[]} for `rest`), exit 0
+# `repos policy <kind> create|update` store the settings and scope they were given under
+# $SDLC_MOCK_STATE/policies.json and `repos policy list` returns every stored policy
+# (no branch filtering: the adapter must filter by scope itself).
 set -u
 S="${SDLC_MOCK_STATE:-${TMPDIR:-/tmp}/ai-sdlc-mock-state}"; mkdir -p "$S"
 [ -n "${SDLC_MOCK_LOG:-}" ] && printf 'az %s\n' "$*" >>"$SDLC_MOCK_LOG"
 ORG="https://dev.azure.com/mock-org"; PROJ="mock-proj"; REPO="mock-repo"; REPO_ID="11111111-2222-3333-4444-555555555555"
+all="$*"
+if [ -n "${SDLC_MOCK_FAIL:-}" ] && [[ "$all" == "$SDLC_MOCK_FAIL"* ]]; then
+  echo "ERROR: simulated failure of 'az $SDLC_MOCK_FAIL' (TF400813: the request was not authorized)" >&2; exit 1
+fi
+if [ -n "${SDLC_MOCK_MALFORMED:-}" ] && [[ "$all" == "$SDLC_MOCK_MALFORMED"* ]]; then echo "{not json"; exit 0; fi
+if [ -n "${SDLC_MOCK_EMPTY:-}" ] && [[ "$all" == "$SDLC_MOCK_EMPTY"* ]]; then
+  case "$all" in rest*) echo '{"value":[]}' ;; *) echo '[]' ;; esac; exit 0
+fi
 next_id() { local f="$S/$1.counter" n=0; [ -f "$f" ] && n=$(<"$f"); n=$((n+1)); echo "$n" >"$f"; echo "$n"; }
 arg_after() { local k="$1"; shift; while [ $# -gt 0 ]; do if [ "$1" = "$k" ]; then echo "${2:-}"; return; fi; shift; done; }
 query=$(arg_after --query "$@"); output=$(arg_after -o "$@"); [ -z "$output" ] && output=$(arg_after --output "$@")
@@ -17,6 +35,49 @@ emit() {  # apply --query (subset: dotted path) and -o tsv when asked
     esac
   fi
   if [ "$output" = "tsv" ]; then echo "$json" | jq -r 'if type=="array" then .[]|tostring else tostring end'; else echo "$json"; fi
+}
+
+# policy_type <kind> -> POLICY_TYPE_ID, POLICY_TYPE_NAME (well-known Azure DevOps ids)
+policy_type() {
+  case "$1" in
+    approver-count)    POLICY_TYPE_ID=fa4e907d-c16b-4a4c-9dfa-4906e5d171dd; POLICY_TYPE_NAME="Minimum number of reviewers" ;;
+    required-reviewer) POLICY_TYPE_ID=fd2167ab-b0be-447a-8ec8-39368250530e; POLICY_TYPE_NAME="Required reviewers" ;;
+    build)             POLICY_TYPE_ID=0609b952-1397-4640-95ec-e00a01b2c241; POLICY_TYPE_NAME="Build" ;;
+    work-item-linking) POLICY_TYPE_ID=40e92b44-2fe1-4dd6-b3d8-74a9c21d0c6e; POLICY_TYPE_NAME="Work item linking" ;;
+    comment-required)  POLICY_TYPE_ID=c6a1889d-b943-4856-b76f-9e46bb6b0df2; POLICY_TYPE_NAME="Comment requirements" ;;
+    merge-strategy)    POLICY_TYPE_ID=fa4e907d-c16b-4a4c-9dfa-4906e5d171de; POLICY_TYPE_NAME="Require a merge strategy" ;;
+    *)                 POLICY_TYPE_ID="mock-$1"; POLICY_TYPE_NAME="$1" ;;
+  esac
+}
+# policy_from_args <args...> -> JSON {isEnabled,isBlocking,settings,branch,repositoryId}
+# parsed from the flags the adapter passes to `repos policy <kind> create|update`.
+policy_from_args() {
+  local -a a=("$@"); local i=0 k v obj='{"isEnabled":true,"isBlocking":true,"settings":{},"branch":"main"}'
+  obj=$(printf '%s' "$obj" | jq -c --arg r "$REPO_ID" '.repositoryId=$r')
+  bool() { case "${1,,}" in true|1|yes) echo true ;; *) echo false ;; esac; }
+  num() { case "$1" in ''|*[!0-9]*) printf '"%s"' "$1" ;; *) printf '%s' "$1" ;; esac; }
+  while [ $i -lt ${#a[@]} ]; do
+    k="${a[$i]}"; v="${a[$((i+1))]:-}"
+    case "$k" in
+      --minimum-approver-count) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(num "$v")" '.settings.minimumApproverCount=$v') ;;
+      --creator-vote-counts) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(bool "$v")" '.settings.creatorVoteCounts=$v') ;;
+      --allow-downvotes) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(bool "$v")" '.settings.allowDownvotes=$v') ;;
+      --reset-on-source-push) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(bool "$v")" '.settings.resetOnSourcePush=$v') ;;
+      --required-reviewer-ids) obj=$(printf '%s' "$obj" | jq -c --arg v "$v" '.settings.requiredReviewerIds=($v|split(";")|map(select(length>0)))') ;;
+      --message) obj=$(printf '%s' "$obj" | jq -c --arg v "$v" '.settings.message=$v') ;;
+      --build-definition-id) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(num "$v")" '.settings.buildDefinitionId=$v') ;;
+      --display-name) obj=$(printf '%s' "$obj" | jq -c --arg v "$v" '.settings.displayName=$v') ;;
+      --manual-queue-only) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(bool "$v")" '.settings.manualQueueOnly=$v') ;;
+      --queue-on-source-update-only) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(bool "$v")" '.settings.queueOnSourceUpdateOnly=$v') ;;
+      --valid-duration) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(num "$v")" '.settings.validDuration=$v') ;;
+      --blocking) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(bool "$v")" '.isBlocking=$v') ;;
+      --enabled) obj=$(printf '%s' "$obj" | jq -c --argjson v "$(bool "$v")" '.isEnabled=$v') ;;
+      --branch) obj=$(printf '%s' "$obj" | jq -c --arg v "$v" '.branch=$v') ;;
+      --repository-id) obj=$(printf '%s' "$obj" | jq -c --arg v "$v" '.repositoryId=$v') ;;
+    esac
+    i=$((i+1))
+  done
+  printf '%s' "$obj"
 }
 
 case "${1:-} ${2:-} ${3:-}" in
@@ -57,11 +118,16 @@ case "${1:-} ${2:-} ${3:-}" in
     jq -cn --arg n "$n" --arg t "$title" --arg s "$src" --arg g "$tgt" --arg w "$ORG/$PROJ/_git/$REPO" '{pullRequestId:($n|tonumber),title:$t,status:"active",sourceRefName:("refs/heads/"+$s),targetRefName:("refs/heads/"+$g),creationDate:"2026-09-01T10:00:00Z",closedDate:null,createdBy:{uniqueName:"mock@example.com"},repository:{webUrl:$w},reviewers:[]}'; exit 0 ;;
   "repos pr show")
     n=$(arg_after --id "$@")
-    emit "$(jq -cn --arg n "$n" --arg w "$ORG/$PROJ/_git/$REPO" '{pullRequestId:($n|tonumber),title:("PR "+$n),status:"active",sourceRefName:"refs/heads/feature/x",targetRefName:"refs/heads/main",creationDate:"2026-09-01T10:00:00Z",closedDate:null,createdBy:{uniqueName:"mock@example.com"},repository:{webUrl:$w},reviewers:[{vote:0,uniqueName:"lead@example.com"}],lastMergeSourceCommit:{commitId:"deadbeef"}}')"; exit 0 ;;
+    reviewers='[{"vote":0,"uniqueName":"lead@example.com","displayName":"Lead","id":"r-lead"}]'
+    if [ -n "${SDLC_MOCK_PR_REVIEWERS:-}" ]; then reviewers="$SDLC_MOCK_PR_REVIEWERS"; fi
+    emit "$(jq -cn --arg n "$n" --arg w "$ORG/$PROJ/_git/$REPO" --argjson r "$reviewers" '{pullRequestId:($n|tonumber),title:("PR "+$n),status:"active",sourceRefName:"refs/heads/feature/x",targetRefName:"refs/heads/main",creationDate:"2026-09-01T10:00:00Z",closedDate:null,createdBy:{uniqueName:"mock@example.com",displayName:"Mock User",id:"u-mock"},repository:{webUrl:$w},reviewers:$r,lastMergeSourceCommit:{commitId:"deadbeef"}}')"; exit 0 ;;
   "repos pr policy")
+    # Evaluations of the PR's branch policies; the build policy is named after the pipeline.
     case "${SDLC_MOCK_CHECKS:-pass}" in
       fail) emit '[{"configuration":{"type":{"displayName":"Build"},"settings":{"displayName":"sdlc-pr-review"}},"status":"rejected","context":{"buildId":77}},{"configuration":{"type":{"displayName":"Minimum number of reviewers"}},"status":"approved"}]' ;;
       pending) emit '[{"configuration":{"type":{"displayName":"Build"},"settings":{"displayName":"sdlc-pr-review"}},"status":"running"}]' ;;
+      empty) emit '[]' ;;
+      skipped) emit '[{"configuration":{"type":{"displayName":"Build"},"settings":{"displayName":"sdlc-pr-review"}},"status":"notApplicable"},{"configuration":{"type":{"displayName":"Minimum number of reviewers"}},"status":"notApplicable"}]' ;;
       *) emit '[{"configuration":{"type":{"displayName":"Build"},"settings":{"displayName":"sdlc-pr-review"}},"status":"approved","context":{"buildId":77}},{"configuration":{"type":{"displayName":"Minimum number of reviewers"}},"status":"approved"}]' ;;
     esac; exit 0 ;;
   "repos pr list")
@@ -70,13 +136,26 @@ case "${1:-} ${2:-} ${3:-}" in
     if [ -f "$S/policies.json" ]; then cat "$S/policies.json"; else echo '[]'; fi; exit 0 ;;
   "repos policy "*)
     kind="$3"; action="${4:-}"
-    case "$kind" in approver-count) dn="Minimum number of reviewers" ;; required-reviewer) dn="Required reviewers" ;; build) dn="Build" ;; work-item-linking) dn="Work item linking" ;; comment-required) dn="Comment requirements" ;; merge-strategy) dn="Require a merge strategy" ;; *) dn="$kind" ;; esac
+    policy_type "$kind"
+    [ -f "$S/policies.json" ] || echo '[]' >"$S/policies.json"
+    given=$(policy_from_args "$@")
     case "$action" in
       create)
-        n=$(next_id policy); [ -f "$S/policies.json" ] || echo '[]' >"$S/policies.json"
-        jq -c --arg n "$n" --arg dn "$dn" '. + [{id:($n|tonumber),isEnabled:true,isBlocking:true,type:{displayName:$dn},settings:{scope:[{refName:"refs/heads/main",matchKind:"exact"}]}}]' "$S/policies.json" >"$S/policies.json.tmp" && mv "$S/policies.json.tmp" "$S/policies.json"
-        jq -cn --arg n "$n" --arg dn "$dn" '{id:($n|tonumber),type:{displayName:$dn}}'; exit 0 ;;
-      update) n=$(arg_after --id "$@"); jq -cn --arg n "$n" --arg dn "$dn" '{id:($n|tonumber),type:{displayName:$dn}}'; exit 0 ;;
+        n=$(next_id policy)
+        jq -c --arg n "$n" --arg tid "$POLICY_TYPE_ID" --arg dn "$POLICY_TYPE_NAME" --argjson g "$given" '. + [{
+          id:($n|tonumber), isEnabled:$g.isEnabled, isBlocking:$g.isBlocking, type:{id:$tid, displayName:$dn},
+          settings:($g.settings + {scope:[{refName:("refs/heads/"+$g.branch), matchKind:"Exact", repositoryId:$g.repositoryId}]})}]' \
+          "$S/policies.json" >"$S/policies.json.tmp" && mv "$S/policies.json.tmp" "$S/policies.json"
+        jq -c --arg n "$n" '.[] | select(.id == ($n|tonumber))' "$S/policies.json"; exit 0 ;;
+      update)
+        n=$(arg_after --id "$@")
+        jq -e --arg n "$n" 'any(.[]; .id == ($n|tonumber))' "$S/policies.json" >/dev/null \
+          || { echo "ERROR: policy configuration $n does not exist" >&2; exit 1; }
+        jq -c --arg n "$n" --argjson g "$given" 'map(if .id == ($n|tonumber) then
+          .isEnabled=$g.isEnabled | .isBlocking=$g.isBlocking
+          | .settings=(.settings + $g.settings + {scope:[{refName:("refs/heads/"+$g.branch), matchKind:"Exact", repositoryId:$g.repositoryId}]})
+          else . end)' "$S/policies.json" >"$S/policies.json.tmp" && mv "$S/policies.json.tmp" "$S/policies.json"
+        jq -c --arg n "$n" '.[] | select(.id == ($n|tonumber))' "$S/policies.json"; exit 0 ;;
     esac ;;
   "pipelines list "*)
     name=$(arg_after --name "$@")

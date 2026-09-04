@@ -3,9 +3,11 @@
 #
 #   merge-settings.sh <target.json> <fragment.json>... [--dry-run]
 #
-# Objects merge recursively, arrays become the union (existing entries first, new unique
-# entries appended), and a scalar already present in the target is kept. The target is
-# created when missing. Prints {"target","changed"}; with --dry-run prints the merged JSON.
+# Objects merge recursively; arrays become the union: existing entries first in their order,
+# every element exactly once (duplicates already in the target are collapsed too), new unique
+# entries appended in fragment order; a scalar already present in the target is kept. The
+# target is created when missing. Prints {"target","changed"}; with --dry-run prints the
+# merged JSON and writes nothing. Running the same merge again is a no-op.
 set -u
 . "${0%/*}/../_root.sh" || exit 2
 . "$SDLC_PLUGIN_ROOT/scripts/_lib.sh"
@@ -25,11 +27,13 @@ else base='{}'; fi
 merged="$base"
 for f in "${frags[@]}"; do
   merged=$(jq -c --argjson add "$(<"$f")" '
+    # first occurrence wins, order kept; index([$x]) would be a subsequence search, not membership
+    def dedupe: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
     def merge($a; $b):
       if ($a | type) == "object" and ($b | type) == "object" then
         reduce ($b | keys[]) as $k ($a; .[$k] = (if ($a | has($k)) then merge($a[$k]; $b[$k]) else $b[$k] end))
       elif ($a | type) == "array" and ($b | type) == "array" then
-        $a + [ $b[] as $x | select(($a | index([$x])) == null) | $x ]
+        ($a + $b) | dedupe
       else $a end;
     merge(.; $add)' <<<"$merged") || sdlc_die 1 "merge-settings.sh: merging $f failed"
 done

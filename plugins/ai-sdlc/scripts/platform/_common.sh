@@ -41,6 +41,86 @@ out_json() {
 
 cli() { "$@"; }
 
+# cli_json <label> <cmd...>: run a platform CLI command whose stdout must be JSON.
+# A non-zero exit or non-JSON output ends the adapter with exit 1 and a message that
+# names <label> (the command text without secrets) and the CLI's first stderr line.
+# A failure is never turned into an empty result. Because callers capture the output
+# with $(...), they must append `|| exit $?` so the die propagates out of the subshell.
+cli_json() {
+  local label="$1"; shift
+  local errf out rc first
+  errf=$(sdlc_tmpfile .err)
+  out=$("$@" 2>"$errf"); rc=$?
+  first=$(head -n1 "$errf" 2>/dev/null); rm -f "$errf"
+  [ $rc -eq 0 ] || sdlc_die 1 "$label failed (exit $rc): ${first:-no error output}"
+  if [ -z "$out" ] || ! printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
+    sdlc_die 1 "$label returned invalid JSON: ${out:0:120}"
+  fi
+  printf '%s' "$out"
+}
+
+# json_list <items...> -> JSON array of the non-empty strings (no items -> [])
+json_list() { printf '%s\n' "$@" | jq -R . | jq -cs 'map(select(length>0))'; }
+
+# pr_checks_result <id> <platform> <checks-json> <required-json> -> the normalised pr_checks
+# object. The rules are identical on every platform and never pass with zero checks:
+#   any fail -> fail; else any pending -> pending; else no checks -> fail (fail closed);
+#   else a required name absent or only skipped -> fail; else nothing passed -> fail;
+#   else pass. A check named "<Type> (<name>)" satisfies the required name <name>.
+pr_checks_result() {
+  jq -cn --arg id "$1" --arg p "$2" --argjson c "$3" --argjson req "$4" '
+    def satisfies($r): .name == $r or (.name | endswith(" (" + $r + ")"));
+    ([$c[] | select(.status=="fail") | .name]) as $failed
+    | ([$c[] | select(.status=="pending") | .name]) as $pend
+    | ([$req[] | . as $r | select(any($c[]; satisfies($r) and .status=="pass") | not)]) as $missing
+    | (if ($failed|length) > 0 then {status:"fail", reason:("failing checks: " + ($failed|join(", ")))}
+       elif ($pend|length) > 0 then {status:"pending", reason:("pending checks: " + ($pend|join(", ")))}
+       elif ($c|length) == 0 then {status:"fail", reason:"no checks reported on the pull request (checks not configured or not started yet): failing closed, re-run later"}
+       elif ($missing|length) > 0 then {status:"fail", reason:("required checks missing or skipped: " + ($missing|join(", ")))}
+       elif (any($c[]; .status=="pass") | not) then {status:"fail", reason:"every check was skipped"}
+       else {status:"pass", reason:null} end) as $v
+    | {id:$id, status:$v.status, checks:$c, required:$req, reason:$v.reason, platform:$p}'
+}
+
+# pr_checks_exit <result-json>: exit 0 pass, 8 pending, 1 fail.
+pr_checks_exit() {
+  case "$(printf '%s' "$1" | jq -r .status)" in pass) exit 0 ;; pending) exit 8 ;; *) exit 1 ;; esac
+}
+
+# config_array <jq path> -> the configured JSON array, or [] when unset or not an array
+config_array() {
+  local v; v=$(read_config "$1" '[]')
+  if printf '%s' "$v" | jq -e 'type=="array"' >/dev/null 2>&1; then printf '%s' "$v"; else printf '[]'; fi
+}
+
+# sdlc_reverts_scan <since> <until>: sets REVERTS_JSON (revert commits from the local git
+# log), REVERTS_SOURCE ("configured" or "partial") and REVERTS_WARNING. The history is
+# partial when the clone is shallow, has no commit older than <since>, or cannot be read.
+# shellcheck disable=SC2034 # These globals are the function's documented outputs for adapters.
+sdlc_reverts_scan() {
+  local since="$1" until="$2" log sha date body target
+  REVERTS_JSON='[]'; REVERTS_SOURCE=configured; REVERTS_WARNING=""
+  if ! log=$(git log --since="$since" --until="${until}T23:59:59" --grep='^Revert' \
+      --format='%H%x1f%cI%x1f%b%x1e' 2>/dev/null); then
+    REVERTS_SOURCE=partial
+    REVERTS_WARNING="git log failed in $(pwd): reverts were not scanned"
+    return 0
+  fi
+  while IFS=$'\x1f' read -r sha date body; do
+    [ -n "$sha" ] || continue
+    target=$(printf '%s' "$body" | grep -oE 'reverts commit [0-9a-f]{7,40}' | head -n1 | awk '{print $3}')
+    REVERTS_JSON=$(printf '%s' "$REVERTS_JSON" | jq -c --arg sha "$sha" --arg d "$date" --arg t "${target:-}" \
+      '. + [{sha:$sha, committed_at:$d, reverts_sha:(if $t=="" then null else $t end)}]')
+  done < <(printf '%s' "$log" | tr -d '\n' | tr '\036' '\n')
+  if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+    REVERTS_SOURCE=partial
+    REVERTS_WARNING="local git history is shallow: reverts older than the clone depth are not visible"
+  elif [ -z "$(git rev-list -n1 --before="${since}T00:00:00" HEAD 2>/dev/null)" ]; then
+    REVERTS_SOURCE=partial
+    REVERTS_WARNING="local git history has no commit older than $since: reverts before the earliest local commit are not visible"
+  fi
+}
+
 read_config() {  # read_config <jq path> [default]
   if [ -n "${SDLC_CONFIG:-}" ] && [ -f "$SDLC_CONFIG" ]; then sdlc_config "$1" "${2:-}"; else printf '%s' "${2:-}"; fi
 }

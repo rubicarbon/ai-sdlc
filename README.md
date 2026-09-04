@@ -71,7 +71,7 @@ Ask `ai-sdlc:sdlc-loop` (or `/ai-sdlc:sdlc-status`) what comes next; it checks a
 | 0 | Foundation | managed block in `CLAUDE.md`, `CONTEXT.md` seed, `docs/agents/domain.md`, deny rules in `.claude/settings.json`, `.gitignore` markers; the last next step is the metrics baseline |
 | 1 | Artifacts | `REVIEW.md`, `docs/agents/issue-tracker.md` (GitHub or Azure), the `.sdlc/` tree, `docs/adr/` |
 | 2 | Guardrails | `guardrails.requireTicket` on; branch protection through `sdlc-platform branch_protect_apply` |
-| 3 | Automation | CI templates (`.github/workflows/sdlc-*.yml` or `.azuredevops/pipelines/sdlc-*.yml`), PR template, `CODEOWNERS` (GitHub; Azure uses `azure.requiredReviewers`), cost caps, `sdlc-platform ci_workflow_install` |
+| 3 | Automation | CI templates (`.github/workflows/sdlc-*.yml` or `.azuredevops/pipelines/sdlc-*.yml`), PR template, `CODEOWNERS` (GitHub; Azure uses `azure.requiredReviewers`), cost caps, `sdlc-platform ci_workflow_install`; the deploy workflow runs `commands.deployStaging` and `commands.deployProduction` (required, or `--no-deploy`); human-only platform steps are in `docs/PLATFORM-SETUP.md` |
 
 Tier 3 always includes tiers 0 to 2. The metrics baseline is captured at tier 0 because `scripts/metrics/baseline.sh` refuses to run once tier 1 artifacts exist (a baseline taken after the change is not a baseline; `--force` overrides and records that fact).
 
@@ -85,10 +85,10 @@ All hooks live in `plugins/ai-sdlc/hooks/` and exit 0 silently in any repository
 
 - `guard-secrets`: denies reads and writes of `.env*` (except example files), `secrets/**`, private keys, the SSH, AWS, Azure and gh credential directories in the home directory, and `guardrails.secretPaths`, including through Bash and PowerShell.
 - `guard-protected-paths`: denies edits to `guardrails.protectedPaths` (CI files, `CODEOWNERS`, `sdlc.config.json`, `.claude/settings.json`, lockfiles by default) unless a human created `.sdlc/UNLOCK_PROTECTED`.
-- `guard-test-edits`: while `.sdlc/FIX_MODE` exists, test files cannot be edited, so a fix cannot pass by changing the test.
-- `guard-verifier-readonly`: every edit and write-shaped command from the `sdlc-verifier` or `sdlc-security-auditor` subagent is denied.
-- `guard-ticket-gate`: with `guardrails.requireTicket` on (default from tier 2), source edits need `.sdlc/ACTIVE_TICKET`; docs, specs, tickets, ADRs and the glossary stay editable.
-- `gate-production`: commands matching `environments.prod.deployCommandPatterns` run only while `.sdlc/release/AUTHORIZED-<HEAD sha>` exists, is unexpired and was written by `scripts/ship/authorize.sh`, which refuses to run inside a Claude session.
+- `guard-test-edits`: while `.sdlc/FIX_MODE` exists, test files cannot be changed through file tools or shell commands (`sed -i`, redirections, `tee`, `Set-Content`); scripts, interpreters and unresolvable targets are denied, so a fix cannot pass by changing the test.
+- `guard-verifier-readonly`: the `sdlc-verifier` and `sdlc-security-auditor` subagents cannot edit files, and their shell is an allowlist of read-only commands plus `scripts/verify/run-isolated.sh`, which runs `commands.verify` in a disposable worktree and proves the main checkout did not change.
+- `guard-ticket-gate`: with `guardrails.requireTicket` on (default from tier 2), source changes through file tools or shell need `.sdlc/ACTIVE_TICKET`; docs, specs, tickets, ADRs, the glossary, read-only commands, test runners and plugin scripts stay usable.
+- `gate-production`: commands matching `environments.prod.deployCommandPatterns` (including the configured production deploy command) run only while `.sdlc/release/AUTHORIZED-<HEAD sha>` is a complete, unexpired marker bound to `HEAD` (every field exactly once, validated by `scripts/ship/_authz.sh`) written by `scripts/ship/authorize.sh`, which refuses to run inside a Claude session.
 - `post-edit-verify` (PostToolUse): runs `commands.format` then `commands.lint` on the edited file; lint failures come back to the agent immediately.
 
 ### Metrics
@@ -120,8 +120,11 @@ plugins/ai-sdlc/
 ```bash
 bash plugins/ai-sdlc/evals/run.sh                       # every eval case; add a word to filter
 bash plugins/ai-sdlc/scripts/platform/conformance.sh    # both adapters under mocks, diffed
+python -B -m unittest discover -s plugins/ai-sdlc/evals/python   # report.py unit tests
 claude plugin validate . --strict                       # marketplace and plugin manifests
 ```
+
+`.github/workflows/ci.yml` runs the same checks plus shellcheck, a YAML parse of every rendered CI template and actionlint on every push and pull request.
 
 Evals are plain bash cases under `plugins/ai-sdlc/evals/cases/`: hooks are fed fixture stdin, adapters run against the mock `gh` and `az` in `scripts/platform/_mocks/bin`, and init runs non-interactively into scratch repos under `.dev/scratch/`. Azure CLI behaviour is therefore mock-verified, not live-verified, in this build; `.dev/VERIFY.md` lists what still needs a real project and how to check it. `shellcheck -S warning` runs in the `sdlc-evals` CI template on ubuntu; run it locally when it is installed.
 
@@ -143,6 +146,7 @@ Files rendered into your project stay; `.sdlc/managed-files.json` lists them if 
 - `docs/ADOPTION.md`: tier by tier rollout for a team
 - `docs/METRICS.md`: what is measured, how, and what the counterweights guard against
 - `docs/SECURITY.md`: threat model, secrets, the production gate and the human-only steps
+- `docs/PLATFORM-SETUP.md`: the exact manual steps on GitHub and Azure DevOps (secrets, environments, approvals, variable groups, policies)
 - `plugins/ai-sdlc/scripts/platform/contract.md`: the normative adapter interface
 
-License: MIT.
+License: MIT (see `LICENSE`).

@@ -21,7 +21,7 @@ Measure the period, then say what moved. Load `ai-sdlc:sdlc-metrics` for what ea
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/cost/report.sh" --threshold <cost.alertThresholdUsd> --out .sdlc/metrics/cost/<date>.json --md <result.json>...
    ```
 
-   Exit 1 means the total exceeded the threshold; report that as a finding, not an error.
+   Exit 1 means the total exceeded the threshold; report that as a finding, not an error. Report every path listed under `skipped` in its summary: those inputs were unreadable and are not in the total.
 
 3. Spawn the `ai-sdlc:sdlc-metrics-analyst` subagent with the Agent tool, giving it the `report`, `raw` and `baseline` paths. Return its narrative unchanged: headline, counterweights, confidence, self-reported versus measured, next measurement.
 
