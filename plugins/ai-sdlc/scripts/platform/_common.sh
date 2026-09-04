@@ -110,7 +110,7 @@ sdlc_reverts_scan() {
     target=$(printf '%s' "$body" | grep -oE 'reverts commit [0-9a-f]{7,40}' | head -n1 | awk '{print $3}')
     REVERTS_JSON=$(printf '%s' "$REVERTS_JSON" | jq -c --arg sha "$sha" --arg d "$date" --arg t "${target:-}" \
       '. + [{sha:$sha, committed_at:$d, reverts_sha:(if $t=="" then null else $t end)}]')
-  done < <(printf '%s' "$log" | tr -d '\n' | tr '\x1e' '\n')
+  done < <(printf '%s' "$log" | tr -d '\n' | tr '\036' '\n')
   if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
     REVERTS_SOURCE=partial
     REVERTS_WARNING="local git history is shallow: reverts older than the clone depth are not visible"
