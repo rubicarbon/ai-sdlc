@@ -23,7 +23,7 @@ Pick one repository and one person. The goal of the week is one feature through 
 
 ```
 /plugin install mattpocock-skills
-/plugin marketplace add gergely-somogyvari/ai-sdlc-kit
+/plugin marketplace add rubicarbon/ai-sdlc
 /plugin install ai-sdlc@ai-sdlc-kit
 ```
 

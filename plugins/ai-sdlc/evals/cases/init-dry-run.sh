@@ -61,7 +61,7 @@ printf '# My project\n\nKeep this line.\n' >"$ex/CLAUDE.md"; mkdir -p "$ex/.clau
 bash "$RUN" --repo-dir "$ex" --platform github --tier 0 --team team --yes >/dev/null 2>&1
 grep -q 'Keep this line.' "$ex/CLAUDE.md" && grep -q 'ai-sdlc:begin' "$ex/CLAUDE.md" && _ok "existing CLAUDE.md kept, managed block appended" || _fail "CLAUDE.md merge" "$(cat "$ex/CLAUDE.md")"
 jq -e '.model=="opus" and ((.permissions.allow|index("Bash(npm test)")) != null) and ((.permissions.deny|index("Read(.env)")) != null) and ((.permissions.deny|map(select(.=="Read(secrets/**)"))|length)==1)' "$ex/.claude/settings.json" >/dev/null && _ok "settings merged: existing keys kept, deny rules unioned without duplicates" || _fail "settings merge" "$(cat "$ex/.claude/settings.json")"
-jq -e '.enabledPlugins["ai-sdlc@ai-sdlc-kit"]==true and .extraKnownMarketplaces["ai-sdlc-kit"].source.repo=="gergely-somogyvari/ai-sdlc-kit"' "$ex/.claude/settings.json" >/dev/null && _ok "team mode enables the plugins for teammates" || _fail "team enabledPlugins" ""
+jq -e '.enabledPlugins["ai-sdlc@ai-sdlc-kit"]==true and .extraKnownMarketplaces["ai-sdlc-kit"].source.repo=="rubicarbon/ai-sdlc"' "$ex/.claude/settings.json" >/dev/null && _ok "team mode enables the plugins for teammates" || _fail "team enabledPlugins" ""
 bash "$RUN" --repo-dir "$ex" --yes >/dev/null 2>&1
 assert_eq "1" "$(grep -c 'ai-sdlc:begin' "$ex/CLAUDE.md")" "re-run does not duplicate the managed block"
 

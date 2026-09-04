@@ -159,7 +159,7 @@ Acceptance for a release of the kit: `claude plugin validate . --strict` passes,
 
 | Decision | Detail |
 | --- | --- |
-| Author and repository owner | The author name is `gergely.somogyvari` (plugin and marketplace manifests). GitHub does not allow dots in user names, so the repository owner is written `gergely-somogyvari` (`https://github.com/gergely-somogyvari/ai-sdlc-kit`), pending confirmation |
+| Author and repository owner | The plugin and marketplace manifests carry author `gergely.somogyvari`. The repository lives at `https://github.com/rubicarbon/ai-sdlc`, owner `rubicarbon` |
 | Inner loop is reused, not rebuilt | `mattpocock-skills` supplies grill, spec, tickets, implement, tdd, review; `docs/REUSE.md` maps every skill; `scripts/reuse/check-mattpocock.sh` compares the installed plugin with the pinned manifest and `/ai-sdlc:sdlc-status` runs it |
 | `bin/` provides `sdlc-platform` on `PATH` | Skills, agents and templates call the bare command; outside Claude Code use `<plugin-root>/bin/sdlc-platform` |
 | `CLAUDE_PLUGIN_ROOT` shim | `scripts/_root.sh`: variable, then script path, then plugin cache; never `/` |

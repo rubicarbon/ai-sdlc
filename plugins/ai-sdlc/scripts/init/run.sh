@@ -106,7 +106,7 @@ else
     --arg verify "$verify" --arg fmt "$format_cmd" --arg lint "$lint_cmd" --argjson envs "$env_json" \
     --arg azo "$az_org" --arg azp "$az_project" --arg azr "$az_repo" --arg reuse "$reuse" \
     --arg mt "${max_turns:-40}" --arg mb "${max_budget:-5}" --arg at "${alert:-25}" '
-    { "$schema": "https://raw.githubusercontent.com/gergely-somogyvari/ai-sdlc-kit/main/sdlc.config.schema.json",
+    { "$schema": "https://raw.githubusercontent.com/rubicarbon/ai-sdlc/main/sdlc.config.schema.json",
       version: 1, pluginVersion: $pv, platform: $platform, tier: $tier,
       repo: {owner: $owner, name: $name, defaultBranch: $branch},
       stack: ({language: $lang, packageManager: $pm} | with_entries(select(.value != ""))),

@@ -4,10 +4,10 @@
   "description": "AI-native SDLC workspace: platform adapters for GitHub and Azure DevOps, deterministic hooks, verifier and security-auditor subagents, CI review, cost caps, DORA metrics and evals. Delegates the inner loop to mattpocock-skills.",
   "author": {
     "name": "gergely.somogyvari",
-    "url": "https://github.com/gergely-somogyvari"
+    "url": "https://github.com/rubicarbon"
   },
-  "homepage": "https://github.com/gergely-somogyvari/ai-sdlc-kit",
-  "repository": "https://github.com/gergely-somogyvari/ai-sdlc-kit",
+  "homepage": "https://github.com/rubicarbon/ai-sdlc",
+  "repository": "https://github.com/rubicarbon/ai-sdlc",
   "license": "MIT",
   "keywords": [
     "sdlc",

@@ -21,7 +21,7 @@ Bash is required as well; on Windows the Git for Windows bash is enough.
 Inside a Claude Code session, in any directory:
 
 ```
-/plugin marketplace add gergely-somogyvari/ai-sdlc-kit
+/plugin marketplace add rubicarbon/ai-sdlc
 /plugin install ai-sdlc@ai-sdlc-kit
 /plugin install mattpocock-skills
 ```

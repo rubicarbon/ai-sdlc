@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/gergely-somogyvari/ai-sdlc-kit/main/sdlc.config.schema.json",
+  "$id": "https://raw.githubusercontent.com/rubicarbon/ai-sdlc/main/sdlc.config.schema.json",
   "title": "ai-sdlc project configuration (sdlc.config.json)",
   "description": "Written by /ai-sdlc:sdlc-init and read by every hook, adapter and command of the ai-sdlc plugin. The plugin's scripts/config/validate.sh checks a file against this schema with jq alone.",
   "type": "object",

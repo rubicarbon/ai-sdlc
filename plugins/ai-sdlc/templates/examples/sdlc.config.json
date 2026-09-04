@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/gergely-somogyvari/ai-sdlc-kit/main/sdlc.config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/rubicarbon/ai-sdlc/main/sdlc.config.schema.json",
   "version": 1,
   "pluginVersion": "0.1.0",
   "platform": "azure",

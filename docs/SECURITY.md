@@ -64,4 +64,4 @@ Hooks and permission rules see file paths and shell commands. They do not see wh
 
 ## Reporting a security issue in the kit
 
-Open an issue on the repository: `https://github.com/gergely-somogyvari/ai-sdlc-kit/issues`. Describe the control that failed, the exact tool call or command that got through, and the plugin version (`SDLC_PLUGIN_VERSION`, printed by `/ai-sdlc:sdlc-status`). If the report contains a real secret or a reproduction against a real production system, redact the values and say so in the issue; the location is enough.
+Open an issue on the repository: `https://github.com/rubicarbon/ai-sdlc/issues`. Describe the control that failed, the exact tool call or command that got through, and the plugin version (`SDLC_PLUGIN_VERSION`, printed by `/ai-sdlc:sdlc-status`). If the report contains a real secret or a reproduction against a real production system, redact the values and say so in the issue; the location is enough.

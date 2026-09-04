@@ -2,7 +2,7 @@
   "name": "ai-sdlc-kit",
   "owner": {
     "name": "gergely.somogyvari",
-    "url": "https://github.com/gergely-somogyvari"
+    "url": "https://github.com/rubicarbon"
   },
   "description": "AI-native SDLC workspace for Claude Code: platform adapters (GitHub, Azure DevOps), deterministic guardrails, CI review, metrics and evals around the mattpocock-skills inner loop.",
   "plugins": [

@@ -5,7 +5,7 @@ Claude Code plugin that turns a software project into an AI-native SDLC workspac
 ## Install
 
 ```
-/plugin marketplace add gergely-somogyvari/ai-sdlc-kit
+/plugin marketplace add rubicarbon/ai-sdlc
 /plugin install ai-sdlc@ai-sdlc-kit
 /plugin install mattpocock-skills
 /ai-sdlc:sdlc-init

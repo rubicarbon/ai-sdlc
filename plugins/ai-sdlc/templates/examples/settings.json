@@ -30,7 +30,7 @@
     "ai-sdlc-kit": {
       "source": {
         "source": "github",
-        "repo": "gergely-somogyvari/ai-sdlc-kit"
+        "repo": "rubicarbon/ai-sdlc"
       }
     }
   },

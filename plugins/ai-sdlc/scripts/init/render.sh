@@ -48,7 +48,7 @@ if [ -n "$cfg" ] && [ -f "$cfg" ]; then
 fi
 vars[PLUGIN_VERSION]="$SDLC_PLUGIN_VERSION"
 vars[PLUGIN_ID]="ai-sdlc@ai-sdlc-kit"
-vars[MARKETPLACE_REPO]="gergely-somogyvari/ai-sdlc-kit"
+vars[MARKETPLACE_REPO]="rubicarbon/ai-sdlc"
 vars[DATE]=$(sdlc_today)
 for o in "${overrides[@]+"${overrides[@]}"}"; do vars["${o%%=*}"]="${o#*=}"; done
 
