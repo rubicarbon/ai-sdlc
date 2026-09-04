@@ -11,7 +11,7 @@ Treat the rules as a guard against accidental reads and edits in the obvious pla
 ### Known gaps
 
 - **Paths.** The rules name outside roots explicitly, so any outside path that is not one of those roots is not denied.
-- **Tools.** Only `Read` and `Edit` are covered. `Write`, `Glob`, `Grep` and the `Bash`/`PowerShell` tools are unrestricted, and shell commands can read or modify anything the user account can.
+- **Tools.** The rules name `Read` and `Edit`. `Write` is evaluated against the `Edit` rules, so it is denied wherever an `Edit` entry exists — but not on the roots listed for `Read` only. `Glob`, `Grep` and the `Bash`/`PowerShell` tools are not covered at all, and shell commands can read or modify anything the user account can.
 - **Scratchpad.** The Claude Code scratchpad directory offered by the harness lives outside the repo. Prefer `.dev/scratch/` (gitignored) so throwaway material stays with the repo.
 
 Closing the tool-level gaps would need a `PreToolUse` hook; one existed in an earlier revision and was removed as dev-only weight. Nothing here is a substitute for reviewing what a session actually did before committing.
