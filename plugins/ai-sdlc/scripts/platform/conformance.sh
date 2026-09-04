@@ -7,13 +7,13 @@
 # contract function through bin/sdlc-platform, checks exit codes and stdout shapes,
 # then diffs the normalised key sets between platforms. Exit 1 on any divergence.
 set -u
-here=$(CDPATH= cd -- "${0%/*}" && pwd -P)
+here=$(CDPATH='' cd -- "${0%/*}" && pwd -P)
 . "$here/../_root.sh" || exit 2
 BIN="$SDLC_PLUGIN_ROOT/bin/sdlc-platform"
 want="all"; keep=0
 while [ $# -gt 0 ]; do case "$1" in --platform) want="$2"; shift 2 ;; --keep) keep=1; shift ;; *) shift ;; esac; done
 scratch="${EVAL_TMP:-${SDLC_CONFORMANCE_SCRATCH:-$SDLC_PLUGIN_ROOT/../../.dev/scratch/conformance}}"
-mkdir -p "$scratch"; scratch=$(CDPATH= cd -- "$scratch" && pwd -P)
+mkdir -p "$scratch"; scratch=$(CDPATH='' cd -- "$scratch" && pwd -P)
 fails=0; checks=0
 ok()   { checks=$((checks+1)); printf '  ok    [%s] %s\n' "$1" "$2"; }
 bad()  { checks=$((checks+1)); fails=$((fails+1)); printf '  FAIL  [%s] %s\n        %s\n' "$1" "$2" "${3:-}"; }
@@ -36,7 +36,8 @@ shape() {
 keys_of() { printf '%s' "$1" | jq -c '[paths | map(select(type=="string"))] | unique | map(select(length>0))'; }
 
 setup_repo() {
-  local p="$1" d="$scratch/$p"
+  local p="$1"
+  local d="$scratch/$p"
   rm -rf "$d"; mkdir -p "$d/state" "$d/repo"
   git -C "$d/repo" init -q -b main
   git -C "$d/repo" config user.email conf@example.com; git -C "$d/repo" config user.name conformance; git -C "$d/repo" config core.autocrlf false
@@ -61,7 +62,8 @@ JSON
 }
 
 run_platform() {
-  local p="$1" d="$scratch/$p"
+  local p="$1"
+  local d="$scratch/$p"
   setup_repo "$p"
   cd "$d/repo" || exit 1
   export SDLC_CI_TEMPLATES_DIR="$SDLC_PLUGIN_ROOT/scripts/platform/_mocks/templates"

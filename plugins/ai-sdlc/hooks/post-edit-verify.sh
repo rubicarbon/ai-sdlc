@@ -5,7 +5,7 @@
 # Claude sees the first lines and fixes them now instead of at review time.
 # Silent when commands.format and commands.lint are absent or the file type is not listed.
 set -u
-HOOK_FAIL_OPEN=1
+export HOOK_FAIL_OPEN=1
 . "${0%/*}/../scripts/_root.sh" || exit 0
 . "$SDLC_PLUGIN_ROOT/scripts/_hook.sh"
 

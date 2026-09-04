@@ -24,6 +24,7 @@
 # --- selection ---------------------------------------------------------------------------
 
 sdlc_verify_reports() {     # sdlc_verify_reports <dir> : verification reports, newest first
+  # shellcheck disable=SC2010 # ls -t deliberately preserves the report recency ordering.
   ls -t "$1"/*.md 2>/dev/null | grep -v -- '-security\.md$' || true
 }
 sdlc_latest_verify_report() { sdlc_verify_reports "$1" | head -n1; }

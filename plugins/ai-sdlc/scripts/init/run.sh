@@ -44,7 +44,7 @@ RENDER="$SDLC_PLUGIN_ROOT/scripts/init/render.sh"
 dir="$PWD"; platform=""; tier=""; team=""; verify=""; format_cmd=""; lint_cmd=""; envs="dev,staging,prod"
 owner=""; name=""; az_org=""; az_project=""; az_repo=""; max_turns=""; max_budget=""; alert=""
 deploy_staging=""; deploy_production=""; no_deploy=0
-yes=0; force=0; upgrade=0; check=0; dry=0; only=()
+force=0; upgrade=0; check=0; dry=0; only=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-dir) dir="$2"; shift 2 ;;
@@ -67,7 +67,7 @@ while [ $# -gt 0 ]; do
     --max-turns) max_turns="$2"; shift 2 ;;
     --max-budget-usd) max_budget="$2"; shift 2 ;;
     --alert-threshold-usd) alert="$2"; shift 2 ;;
-    --yes|--non-interactive) yes=1; shift ;;
+    --yes|--non-interactive) shift ;;
     --force) force=1; shift ;;
     --upgrade) upgrade=1; shift ;;
     --check) check=1; shift ;;

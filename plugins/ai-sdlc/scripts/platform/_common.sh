@@ -96,6 +96,7 @@ config_array() {
 # sdlc_reverts_scan <since> <until>: sets REVERTS_JSON (revert commits from the local git
 # log), REVERTS_SOURCE ("configured" or "partial") and REVERTS_WARNING. The history is
 # partial when the clone is shallow, has no commit older than <since>, or cannot be read.
+# shellcheck disable=SC2034 # These globals are the function's documented outputs for adapters.
 sdlc_reverts_scan() {
   local since="$1" until="$2" log sha date body target
   REVERTS_JSON='[]'; REVERTS_SOURCE=configured; REVERTS_WARNING=""

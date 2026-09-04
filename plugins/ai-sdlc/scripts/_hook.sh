@@ -31,13 +31,14 @@ eval "$HOOK__PARSED"
 unset HOOK__PARSED
 
 HOOK_PROJECT=$(sdlc_norm_path "$SDLC_PROJECT_DIR")
+# shellcheck disable=SC2034 # Sourced hook scripts consume this shared artifact directory.
 HOOK_ARTIFACTS=$(sdlc_artifacts_dir)
 hook_home() { sdlc_norm_path "${HOME:-${USERPROFILE:-}}"; }
 
 # hook_rel <path> : project-relative with forward slashes (absolute if outside the project)
 hook_rel() {
   local p; p=$(sdlc_norm_path "$1")
-  case "$p" in /*|//*) ;; *) p="$(sdlc_norm_path "${HOOK_CWD:-$PWD}")/$p" ;; esac
+  case "$p" in /*) ;; *) p="$(sdlc_norm_path "${HOOK_CWD:-$PWD}")/$p" ;; esac
   p=$(sdlc_abs_path "$p")
   case "${p,,}" in "${HOOK_PROJECT,,}"/*) printf '%s' "${p:$(( ${#HOOK_PROJECT} + 1 ))}" ;; *) printf '%s' "$p" ;; esac
 }
@@ -55,7 +56,8 @@ hook_cmd_paths() {
   cmd="${cmd//&&/$nl}"; cmd="${cmd//||/$nl}"; cmd="${cmd//;/$nl}"; cmd="${cmd//|/$nl}"; cmd="${cmd//\$(/$nl}"; cmd="${cmd//\`/$nl}"; cmd="${cmd//$br/$nl}"
   while IFS= read -r seg; do
     seg="${seg//\"/}"; seg="${seg//\'/}"
-    set -f; local -a toks=($seg); set +f
+    local -a toks=()
+    read -r -a toks <<<"$seg"
     for t in "${toks[@]+"${toks[@]}"}"; do
       t="${t#[0-9]}"; t="${t##[<>]}"; t="${t##[<>]}"; t="${t#&}"
       case "$t" in --*=*|-[A-Za-z]=*|[A-Za-z_]*=*) t="${t#*=}" ;; esac
@@ -122,7 +124,8 @@ hook__scan_add_target() {  # hook__scan_add_target <token> <vcwd>
 }
 hook__scan_norm() {  # normalise whitespace of a segment for comparison with configured commands
   local s="$1" out="" t
-  set -f; local -a toks=($s); set +f
+  local -a toks=()
+  read -r -a toks <<<"$s"
   for t in "${toks[@]+"${toks[@]}"}"; do out="${out:+$out }$t"; done
   printf '%s' "$out"
 }
@@ -136,7 +139,7 @@ hook__scan_gitmeta() {  # hook__scan_gitmeta <segment> : git metadata mutation (
 
 hook_cmd_scan() {
   local cmd="$1" nl=$'\n' seg br='[(){}]'
-  HOOK_SCAN_CLASS=readonly; HOOK_SCAN_TARGETS=""; HOOK_SCAN_DYNAMIC=0; HOOK_SCAN_OPAQUE=""; HOOK_SCAN_PLUGIN=""; HOOK_SCAN_VERIFY=""
+  HOOK_SCAN_CLASS="readonly"; HOOK_SCAN_TARGETS=""; HOOK_SCAN_DYNAMIC=0; HOOK_SCAN_OPAQUE=""; HOOK_SCAN_PLUGIN=""; HOOK_SCAN_VERIFY=""
   HOOK_SCAN_GITMETA=""
   HOOK__SCAN_VCWD_DYNAMIC=0
   local vcwd; vcwd=$(sdlc_norm_path "${HOOK_CWD:-$PWD}")
@@ -156,7 +159,8 @@ hook_cmd_scan() {
     local trimmed="${seg#"${seg%%[! ]*}"}"
     case "$trimmed" in \"*|\'*) continue ;; esac
     seg="${seg//\"/}"; seg="${seg//\'/}"
-    set -f; local -a toks=($seg); set +f
+    local -a toks=()
+    read -r -a toks <<<"$seg"
     [ ${#toks[@]} -eq 0 ] && continue
     local n=${#toks[@]} i=0 t j cls=readonly word lw tgt
     local -a args=()
@@ -189,7 +193,8 @@ hook_cmd_scan() {
     if [ -n "$cfg_format" ] && { [ "$nseg" = "$cfg_format" ] || [ "${nseg#"$cfg_format" }" != "$nseg" ]; }; then
       HOOK_SCAN_VERIFY="${HOOK_SCAN_VERIFY}format"$'\n'; hook__scan_worse writes
       local rest="${nseg#"$cfg_format"}"
-      set -f; local -a ftoks=($rest); set +f
+      local -a ftoks=()
+      read -r -a ftoks <<<"$rest"
       for t in "${ftoks[@]+"${ftoks[@]}"}"; do case "$t" in -*) ;; *) hook__scan_add_target "$t" "$vcwd" ;; esac; done
       continue
     fi
@@ -235,7 +240,7 @@ hook_cmd_scan() {
     local -a pos=()
     for t in "${args[@]+"${args[@]}"}"; do
       case "$t" in
-        \>*|\&\>*|[0-9]\>*|\<*|[0-9]\<*|\>\&*) ;;                       # redirections handled above
+        \>\&*|\&\>*|[0-9]\>\&*|[0-9]\>*|\<*|[0-9]\<*|\>*) ;;       # redirections handled above
         -*) ;;
         *) pos+=("$t") ;;
       esac
