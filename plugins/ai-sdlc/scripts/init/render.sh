@@ -68,7 +68,7 @@ if [ -n "$out" ]; then
     else echo differs; fi
     exit 0
   fi
-  mkdir -p "${out%/*}" 2>/dev/null || true
+  case "$out" in */*) mkdir -p "${out%/*}" 2>/dev/null || true ;; esac
   printf '%s\n' "$content" > "$out"
 else
   printf '%s\n' "$content"
