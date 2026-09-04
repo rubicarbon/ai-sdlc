@@ -1,0 +1,92 @@
+# Repository CI for the ai-sdlc kit: deterministic evals, adapter conformance under mocks,
+# shell lint, Python tests, manifest validation and YAML parsing of the rendered CI templates.
+# Nothing here talks to a real GitHub or Azure DevOps organisation.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tool versions
+        run: |
+          bash --version | head -n1
+          jq --version
+          git --version
+          python3 --version
+
+      - name: Plugin evals (bash cases, no LLM)
+        run: bash plugins/ai-sdlc/evals/run.sh
+
+      - name: Adapter conformance under mocks
+        run: bash plugins/ai-sdlc/scripts/platform/conformance.sh --platform all
+
+      - name: Python unit tests (metrics report)
+        run: python3 -B -m unittest discover -s plugins/ai-sdlc/evals/python -v
+
+      - name: Shell lint
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck >/dev/null
+          shellcheck --version | head -n2
+          shellcheck -S warning \
+            plugins/ai-sdlc/hooks/*.sh \
+            plugins/ai-sdlc/scripts/*.sh \
+            plugins/ai-sdlc/scripts/*/*.sh \
+            plugins/ai-sdlc/scripts/platform/*/*.sh \
+            plugins/ai-sdlc/bin/sdlc-platform \
+            .claude/hooks/guard-repo-boundary.sh
+
+      - name: Rendered CI templates parse as YAML
+        run: |
+          python3 -m pip install --quiet pyyaml
+          cfg=plugins/ai-sdlc/templates/examples/sdlc.config.json
+          mkdir -p .dev/scratch/ci-render
+          for t in plugins/ai-sdlc/templates/github/workflows/*.yml plugins/ai-sdlc/templates/azure/pipelines/*.yml; do
+            out=".dev/scratch/ci-render/$(echo "$t" | tr / _)"
+            bash plugins/ai-sdlc/scripts/init/render.sh "$t" --config "$cfg" --out "$out"
+            python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1])); print("yaml ok", sys.argv[1])' "$out"
+          done
+
+      - name: actionlint on the rendered GitHub workflows and this workflow
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest .
+          ./actionlint -version
+          ./actionlint .github/workflows/ci.yml
+          mkdir -p .dev/scratch/actionlint/.github/workflows
+          cp .dev/scratch/ci-render/plugins_ai-sdlc_templates_github_workflows_*.yml .dev/scratch/actionlint/.github/workflows/
+          ( cd .dev/scratch/actionlint && ../../../actionlint )
+
+      - name: Repository boundary hook tests
+        run: bash .dev/boundary-tests.sh
+
+  manifests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Validate the marketplace and plugin manifests
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+          claude plugin validate . --strict
+          claude plugin validate plugins/ai-sdlc --strict
+      - name: No compiled artifacts tracked
+        run: |
+          if git ls-files | grep -E '__pycache__|\.py[cod]$'; then
+            echo "compiled Python artifacts are tracked" >&2; exit 1
+          fi

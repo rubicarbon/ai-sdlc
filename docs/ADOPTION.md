@@ -69,7 +69,7 @@ Run one real, small feature end to end. Ask `ai-sdlc:sdlc-loop` at every step; i
 | `/ai-sdlc:sdlc-publish <feature-dir>` | you | Tracker ids written back as the first line of each file, `publish-manifest.json`. Preview with `--dry-run`. Skipped when `platform` is `none` |
 | write `.sdlc/ACTIVE_TICKET`, then `/mattpocock-skills:implement` on a branch | you | Commits referencing the ticket id |
 | `mattpocock-skills:code-review` | the agent, via the Skill tool | Review notes |
-| `/ai-sdlc:sdlc-verify` | you | `.sdlc/verify/<date>-<sha>.md` with a `**Verdict:**` line, written by the read-only `sdlc-verifier` subagent in a fresh context |
+| `/ai-sdlc:sdlc-verify` | you | `.sdlc/verify/<date>-<sha>.md` with `**Verdict:**` and `**Commit:**` lines, written by the read-only `sdlc-verifier` subagent in a fresh context; it runs `commands.verify` through `scripts/verify/run-isolated.sh` in a disposable worktree (set `commands.verifySetup` when dependencies must be installed first) |
 | `sdlc-platform pr_create <title> <body-file> <base> <head>` | the agent | The PR; a human approves it |
 
 At tier 0 the ticket gate is off, so writing `.sdlc/ACTIVE_TICKET` is a habit you are building for tier 2, not yet an enforced rule. Delete the file when the PR is opened.
@@ -110,7 +110,7 @@ On GitHub this applies the rendered `branch-protection.json`: code-owner reviews
 
 ### Two habits the hooks now enforce
 
-**ACTIVE_TICKET.** With `requireTicket` on, `guard-ticket-gate` denies `Edit`, `Write` and `NotebookEdit` on source files until `.sdlc/ACTIVE_TICKET` names the ticket being built. Documentation, `.md`, `.txt`, `docs/**`, `.claude/**`, the artifacts directory and anything in `guardrails.ticketFreePaths` stay editable so the earlier stages can run.
+**ACTIVE_TICKET.** With `requireTicket` on, `guard-ticket-gate` denies `Edit`, `Write` and `NotebookEdit` on source files, and shell commands that write source (`sed -i`, `echo > file`, `tee`, PowerShell `Set-Content`, `git add <source>`), until `.sdlc/ACTIVE_TICKET` names the ticket being built. Scripts, interpreters, package managers and commands with a target the guard cannot resolve (`$var`, globs) are denied without a ticket too, because the guard cannot see what they write; read-only commands, test runners, the configured verify and lint commands, `git commit`, plugin scripts and `sdlc-platform` keep working. Documentation, `.md`, `.txt`, `docs/**`, `.claude/**`, the artifacts directory and anything in `guardrails.ticketFreePaths` stay editable, through file tools and shell alike, so the earlier stages can run.
 
 ```
 printf '%s\n' "<ticket-id>" > .sdlc/ACTIVE_TICKET
@@ -124,7 +124,7 @@ Take the id from the ticket file's first line (`<!-- sdlc-publish: id=... -->`) 
 touch .sdlc/FIX_MODE
 ```
 
-While the marker exists, `guard-test-edits` denies edits to files matching `guardrails.testGlobs` (defaults cover `*.test.*`, `*.spec.*`, `__tests__/`, `tests/`, `fixtures/` and more), so the fix cannot pass by changing the test. `rm .sdlc/FIX_MODE` after the fix is green. Both markers are in `.gitignore` from tier 0.
+While the marker exists, `guard-test-edits` denies changes to files matching `guardrails.testGlobs` (defaults cover `*.test.*`, `*.spec.*`, `__tests__/`, `tests/`, `fixtures/` and more) through the file tools and through shell commands (`sed -i`, redirections, `tee`, `Set-Content`, `git checkout <test>`), and denies scripts, interpreters and dynamic targets outright, so the fix cannot pass by changing the test. Test runners and the configured verify command keep working. `rm .sdlc/FIX_MODE` after the fix is green. Both markers are in `.gitignore` from tier 0.
 
 **Protected paths.** `guard-protected-paths` denies changes to `guardrails.protectedPaths` (defaults: CI files, `CODEOWNERS`, `sdlc.config.json`, `.claude/settings.json`, lockfiles) and to `.sdlc/release/**`. A human unlocks a one-off change by creating `.sdlc/UNLOCK_PROTECTED`; the marker itself is protected, so the agent cannot create it. Delete it afterwards.
 
@@ -162,16 +162,16 @@ Two things people expect from team mode actually come with tier 3, not with the 
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/init/run.sh" --tier 3
 ```
 
-Before running it, set `cost.maxTurns`, `cost.maxBudgetUsd` and `cost.alertThresholdUsd` in `sdlc.config.json` (the example config uses 40 turns, 5 USD per run, 25 USD per week); they are substituted into the CI files. Then follow `next_steps`: commit the CI files, register them with `sdlc-platform ci_workflow_install`, create `scripts/deploy.sh <environment> <sha>`, and run the setup wizard `/ai-sdlc:sdlc-init` generates at `scripts/sdlc-setup-wizard.sh` for the `ANTHROPIC_API_KEY` secret and the production approval rule.
+Before running it, set `cost.maxTurns`, `cost.maxBudgetUsd` and `cost.alertThresholdUsd` in `sdlc.config.json` (the example config uses 40 turns, 5 USD per run, 25 USD per week); they are substituted into the CI files. Tier 3 also needs the two deploy commands: `run.sh --tier 3 --deploy-staging "<cmd>" --deploy-production "<cmd>"` stores them as `commands.deployStaging` and `commands.deployProduction`, the deploy workflow runs exactly those commands with `SDLC_ENVIRONMENT` and `SDLC_SHA` exported, and the production command is added to `environments.prod.deployCommandPatterns` so the production gate covers it. Without them `run.sh` exits 2 with the flags to pass; `--no-deploy` sets up tier 3 without a deploy workflow. Then follow `next_steps`: commit the CI files, register them with `sdlc-platform ci_workflow_install`, and perform the human-only platform steps in `docs/PLATFORM-SETUP.md` (the `ANTHROPIC_API_KEY` secret or `sdlc-secrets` variable group, the `staging` and `production` environments with a human approval on `production`, build service permissions on Azure).
 
 | File | GitHub | Azure | What it does |
 | --- | --- | --- | --- |
-| PR review | `sdlc-pr-review.yml` | `sdlc-pr-review.yml` | Runs Claude Code on every PR with `--max-turns` and `--max-budget-usd` from the config, loads `ai-sdlc:sdlc-security-review`, posts an advisory comment ranked per `REVIEW.md` plus a spec-compliance section, records `sdlc-cost.json` as a build artifact, and fails the job when the run cost exceeds `cost.maxBudgetUsd`. Read-only tools only. |
+| PR review | `sdlc-pr-review.yml` | `sdlc-pr-review.yml` | Runs Claude Code on every PR with `--max-turns` and `--max-budget-usd` from the config, loads `ai-sdlc:sdlc-security-review`, posts an advisory comment ranked per `REVIEW.md` plus a spec-compliance section, records `sdlc-cost.json` as a build artifact, and fails the job when the run cost exceeds `cost.maxBudgetUsd`. Read-only tools only. The job also fails when the review did not complete: on Azure `scripts/ci/azure-review.sh` requires a successful `claude` result and a report with exactly one `Blocking: <n>` line, otherwise it posts a comment headed `ai-sdlc review FAILED` and exits 1; on GitHub a step fails the job when the action's result is missing, errored or hit a cap. A branch policy on the review pipeline therefore never turns green on a missing review. |
 | Evals | `sdlc-evals.yml` | `sdlc-evals.yml` | Weekly and on config changes: validates `sdlc.config.json` against the schema, runs `run.sh --check` for drift, runs the plugin's own `evals/run.sh`, and runs shellcheck |
-| Deploy | `sdlc-deploy.yml` | `sdlc-deploy.yml` | Staging automatically, production behind the platform's environment approval (GitHub environment `production` reviewers; Azure environment Approvals check). GitHub records each production run through the Deployments API; Azure runs of this pipeline are what `metrics_export` counts as deployments |
+| Deploy | `sdlc-deploy.yml` | `sdlc-deploy.yml` | Runs `commands.deployStaging`, then `commands.deployProduction` behind the platform's environment approval (GitHub environment `production` reviewers; Azure environment Approvals check), with `SDLC_ENVIRONMENT` and `SDLC_SHA` exported. GitHub records each production run through the Deployments API; Azure runs of this pipeline are what `metrics_export` counts as deployments. Rendered only when both commands are configured |
 | Cost report | `sdlc-cost-report.yml` | not rendered | Weekly: sums the last 7 days of `sdlc-cost-*` artifacts and opens or updates an issue labelled `sdlc-cost` when the total crosses `cost.alertThresholdUsd` |
 
-The deploy gate on the agent's side is `gate-production`: any `Bash` or `PowerShell` command matching `environments.prod.deployCommandPatterns` (defaults include `git push * main`, `gh workflow run *deploy*`, `az pipelines run *`, `kubectl apply *`, `helm upgrade *`, `terraform apply *`) is denied unless `.sdlc/release/AUTHORIZED-<HEAD sha>` exists and has not expired. That file is written by `scripts/ship/authorize.sh`, which refuses to run inside a Claude Code session and must be run by a human in their own terminal:
+The deploy gate on the agent's side is `gate-production`: any `Bash` or `PowerShell` command matching `environments.prod.deployCommandPatterns` (defaults include `git push * main`, `gh workflow run *deploy*`, `az pipelines run *`, `kubectl apply *`, `helm upgrade *`, `terraform apply *`) is denied unless `.sdlc/release/AUTHORIZED-<HEAD sha>` exists and is complete and valid: `authorised_by=`, `authorised_at=`, `expires=` and `commit=` each exactly once, a numeric expiry strictly in the future, and a full commit sha equal to `HEAD` and to the file name (`scripts/ship/_authz.sh`). That file is written by `scripts/ship/authorize.sh`, which refuses to run inside a Claude Code session and must be run by a human in their own terminal:
 
 ```
 bash <plugin-root>/scripts/ship/authorize.sh [--sha HEAD] [--ttl-minutes 120]
@@ -220,7 +220,9 @@ Only a human can type the slash commands. The agent calls the Skill-tool names.
 | Test-first | `mattpocock-skills:tdd` (agent) |
 | Bug fix | `mattpocock-skills:diagnosing-bugs` (agent), then `touch .sdlc/FIX_MODE` until green |
 | Review the diff | `mattpocock-skills:code-review` (agent) |
-| Verify in a fresh context | `/ai-sdlc:sdlc-verify [spec-or-ticket] [--base <ref>] [--security]` |
+| Verify in a fresh context | `/ai-sdlc:sdlc-verify [spec-or-ticket] [--base <ref>] [--security]`; re-run after every new commit, reports are bound to `HEAD` |
+| Validate a saved report by hand | `bash <plugin-root>/scripts/loop/validate-report.sh .sdlc/verify/<report>.md [--security]` |
+| Human-only platform steps | `docs/PLATFORM-SETUP.md` |
 | Security review only | `ai-sdlc:sdlc-security-review` (agent), `sdlc-security-auditor` subagent |
 | Platform operations | `sdlc-platform <function> [args]`; `--dry-run` to preview; see `ai-sdlc:sdlc-platform` |
 | Open the PR | `sdlc-platform pr_create <title> <body-file> <base> <head>` |
@@ -252,6 +254,6 @@ Uninstalling removes the hooks, skills, agents, commands and the `sdlc-platform`
 | `.claude/settings.json` deny rules, `extraKnownMarketplaces`, `enabledPlugins` | Edit by hand; the deny rules on secrets are worth keeping |
 | `.gitignore` lines for `.sdlc/ACTIVE_TICKET`, `.sdlc/FIX_MODE`, `.sdlc/UNLOCK_PROTECTED`, `.sdlc/release/`, `.sdlc/tmp/` | Delete the lines |
 | `sdlc.config.json` and the `.sdlc/` tree (specs, tickets, verification reports, releases, postmortems, metrics) | Delete `sdlc.config.json` to make any remaining script exit silently; keep or archive `.sdlc/` as history |
-| `scripts/sdlc-setup-wizard.sh` and `scripts/deploy.sh` | Yours; delete or keep |
+| Whatever `commands.deployStaging` and `commands.deployProduction` run (for example a `scripts/deploy.sh`) | Yours; delete or keep |
 | Branch protection or branch policies, registered pipelines, GitHub environments, the `ANTHROPIC_API_KEY` secret, the `sdlc-cost` label and issues | Platform settings; remove them in the platform UI or CLI |
 | `mattpocock-skills` | `/plugin uninstall mattpocock-skills` if you no longer want the inner loop either |

@@ -52,6 +52,14 @@ if ls ./*.csproj ./*.sln >/dev/null 2>&1 || ls ./*/*.csproj >/dev/null 2>&1; the
 if [ -f Makefile ]; then for tgt in verify check test; do grep -qE "^$tgt:" Makefile && candidates+=("make $tgt"); done; fi
 [ ${#candidates[@]} -gt 0 ] || candidates+=("echo 'set commands.verify in sdlc.config.json'")
 
+# Deploy command proposals for the tier 3 interview: only when the repository already has the
+# conventional script. run.sh never adopts them on its own; the flags stay explicit.
+deploy_staging=""; deploy_production=""
+if [ -f scripts/deploy.sh ]; then
+  deploy_staging='bash scripts/deploy.sh staging "$SDLC_SHA"'
+  deploy_production='bash scripts/deploy.sh production "$SDLC_SHA"'
+fi
+
 mp=$(bash "$SDLC_PLUGIN_ROOT/scripts/reuse/check-mattpocock.sh" --project "$dir" --json 2>/dev/null || true)
 [ -n "$mp" ] || mp='{"installed":false,"editable_copies":[]}'
 
@@ -62,9 +70,11 @@ jq -cn \
   --arg azo "$az_org" --arg azp "$az_project" --arg azr "$az_repo" \
   --argjson ghp "$gh_present" --argjson gha "$gh_auth" --argjson azp_ "$az_present" --argjson aza "$az_auth" --argjson aze "$az_ext" \
   --arg lang "$language" --arg pm "$pm" --argjson cands "$(j "${candidates[@]}")" --argjson mp "$mp" \
+  --arg ds "$deploy_staging" --arg dp "$deploy_production" \
   --argjson cfg "$(exists sdlc.config.json)" --argjson claude "$(exists CLAUDE.md)" --argjson agents "$(exists AGENTS.md)" --argjson ctx "$(exists CONTEXT.md)" --argjson review "$(exists REVIEW.md)" --argjson settings "$(exists .claude/settings.json)" --argjson tracker "$(exists docs/agents/issue-tracker.md)" --argjson scratch "$(exists .scratch)" \
   '{platform:$platform, remote:$remote, defaultBranch:$branch, repo:{owner:$owner,name:$name},
     azure:{organization:$azo,project:$azp,repo:$azr},
     cli:{gh:{present:$ghp,authenticated:$gha}, az:{present:$azp_,authenticated:$aza,devopsExtension:$aze}},
-    stack:{language:$lang,packageManager:$pm}, verifyCandidates:$cands, mattpocock:$mp,
+    stack:{language:$lang,packageManager:$pm}, verifyCandidates:$cands,
+    deployCandidates:{staging:$ds,production:$dp}, mattpocock:$mp,
     existing:{config:$cfg,claudeMd:$claude,agentsMd:$agents,contextMd:$ctx,reviewMd:$review,settings:$settings,issueTracker:$tracker,scratch:$scratch}}'

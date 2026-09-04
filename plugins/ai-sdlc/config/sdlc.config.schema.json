@@ -32,10 +32,11 @@
       "required": ["verify"],
       "properties": {
         "verify": { "type": "string", "minLength": 1, "description": "The one command that proves the code works." },
+        "verifySetup": { "type": "string", "description": "Command run inside the isolated verification worktree before commands.verify, for example a dependency install." },
         "format": { "type": "string", "description": "Formatter invoked with the edited file as its last argument." },
         "lint": { "type": "string", "description": "Linter invoked with the edited file as its last argument; non-zero exit is shown to the agent." },
-        "deployStaging": { "type": "string" },
-        "deployProduction": { "type": "string" }
+        "deployStaging": { "type": "string", "description": "Shell command the generated deploy workflow runs for that environment; SDLC_ENVIRONMENT and SDLC_SHA are exported." },
+        "deployProduction": { "type": "string", "description": "Shell command the generated deploy workflow runs for that environment; SDLC_ENVIRONMENT and SDLC_SHA are exported." }
       }
     },
     "environments": {

@@ -30,6 +30,26 @@ assert_eq "# Use X" "$(printf '%s\n' "$out" | head -n1)" "adr template renders w
 out=$(bash "$render" "$P/templates/github/branch-protection.json" --config "$cfg" --var REVIEW_REQUIRED_APPROVALS=1 2>&1); printf '%s' "$out" | jq -e '.required_status_checks.contexts==["sdlc-pr-review"]' >/dev/null && _ok "branch-protection.json renders checks from config" || _fail "branch-protection.json" "$out"
 out=$(bash "$render" "$P/templates/azure/branch-policies.json" --config "$cfg" --var AZURE_PIPELINE_NAME=sdlc-pr-review 2>&1); printf '%s' "$out" | jq -e '.policies[1].settings.requiredReviewerIds==["lead@contoso.com"]' >/dev/null && _ok "branch-policies.json renders reviewers from config" || _fail "branch-policies.json" "$out"
 
+# deploy templates: the configured commands are authoritative, nothing else is hardcoded
+for t in github/workflows/sdlc-deploy.yml azure/pipelines/sdlc-deploy.yml; do
+  out=$(bash "$render" "$P/templates/$t" --config "$cfg" 2>&1); rc=$?
+  assert_eq "0" "$rc" "$t renders from the example config (${out:0:120})"
+  assert_match 'pnpm run deploy:staging' "$out" "$t runs commands.deployStaging"
+  assert_match 'pnpm run deploy:production' "$out" "$t runs commands.deployProduction"
+  assert_match 'SDLC_ENVIRONMENT: staging' "$out" "$t exports SDLC_ENVIRONMENT for staging"
+  assert_match 'SDLC_ENVIRONMENT: production' "$out" "$t exports SDLC_ENVIRONMENT for production"
+  assert_match 'SDLC_SHA' "$out" "$t exports SDLC_SHA"
+  assert_not_match 'scripts/deploy\.sh' "$out" "$t does not hardcode scripts/deploy.sh"
+  assert_not_match 'sdlc-setup-wizard' "$out" "$t does not reference the setup wizard"
+done
+nodeploy="$EVAL_TMP/nodeploy.json"; jq 'del(.commands.deployStaging) | del(.commands.deployProduction)' "$cfg" >"$nodeploy"
+for t in github/workflows/sdlc-deploy.yml azure/pipelines/sdlc-deploy.yml; do
+  out=$(bash "$render" "$P/templates/$t" --config "$nodeploy" 2>&1); rc=$?
+  assert_eq "1" "$rc" "$t without deploy commands fails to render"
+  assert_match 'unresolved markers .*COMMANDS_DEPLOY_PRODUCTION' "$out" "$t names the missing deploy markers"
+  assert_match 'COMMANDS_DEPLOY_STAGING' "$out" "$t names COMMANDS_DEPLOY_STAGING"
+done
+
 # filled examples contain no markers and no placeholders
 bad=$(grep -rlE '\{\{|TODO|TBD|FIXME' "$P/templates/examples" || true)
 assert_eq "" "$bad" "examples contain no markers or placeholders"

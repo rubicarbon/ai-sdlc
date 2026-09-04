@@ -1,9 +1,10 @@
 # ai-sdlc: environment tiers with a human-gated production step.
 # staging deploys automatically; production runs in the GitHub environment "production",
-# whose required reviewers (set in Settings > Environments, see scripts/sdlc-setup-wizard.sh)
+# whose required reviewers (set in Settings > Environments, see docs/PLATFORM-SETUP.md)
 # are the human gate. Each deployment is recorded through the Deployments API so
 # /ai-sdlc:sdlc-metrics-report can compute deployment frequency, lead time and CFR.
-# The repository owns the deploy mechanics in scripts/deploy.sh <environment> <sha>.
+# The deploy commands are the ones configured in sdlc.config.json (commands.deployStaging
+# and commands.deployProduction); SDLC_ENVIRONMENT and SDLC_SHA are exported to them.
 name: sdlc-deploy
 
 on:
@@ -27,12 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 30
+    env:
+      SDLC_ENVIRONMENT: staging
+      SDLC_SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.sha != '' && inputs.sha || github.sha }}
-      - name: Deploy to staging
-        run: bash scripts/deploy.sh staging "${{ inputs.sha != '' && inputs.sha || github.sha }}"
+          ref: ${{ env.SDLC_SHA }}
+      - name: Deploy to staging (commands.deployStaging)
+        run: |
+          {{COMMANDS_DEPLOY_STAGING}}
 
   production:
     needs: staging
@@ -41,19 +46,21 @@ jobs:
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+      SDLC_ENVIRONMENT: production
+      SDLC_SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SHA }}
+          ref: ${{ env.SDLC_SHA }}
       - name: Open a deployment record
         id: dep
         run: |
-          id=$(gh api -X POST "repos/${{ github.repository }}/deployments" -f ref="$SHA" -f environment=production -F auto_merge=false -F required_contexts='[]' --jq .id)
+          id=$(gh api -X POST "repos/${{ github.repository }}/deployments" -f ref="$SDLC_SHA" -f environment=production -F auto_merge=false -F required_contexts='[]' --jq .id)
           echo "id=$id" >> "$GITHUB_OUTPUT"
           gh api -X POST "repos/${{ github.repository }}/deployments/$id/statuses" -f state=in_progress >/dev/null
-      - name: Deploy to production
-        run: bash scripts/deploy.sh production "$SHA"
+      - name: Deploy to production (commands.deployProduction)
+        run: |
+          {{COMMANDS_DEPLOY_PRODUCTION}}
       - name: Close the deployment record
         if: always()
         run: |

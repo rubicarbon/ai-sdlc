@@ -23,19 +23,29 @@ while [ $# -gt 0 ]; do
 done
 [ ${#files[@]} -gt 0 ] || sdlc_die 2 "report.sh: at least one result file is required"
 
-rows='[]'
+# Each detail row is a canonical run record: run_id and session_id are kept explicitly so
+# metrics/report.py can deduplicate a summary against the raw files it was built from;
+# "session" (session_id, else run_id) and "file" stay for older consumers. Files that are
+# missing or not valid JSON of one of the three shapes are listed under "skipped" in the
+# summary as well as noted on stderr, so a report never hides that input was dropped.
+rows='[]'; skipped='[]'
+skip() { sdlc_log "skipping $1 file $2"; skipped=$(jq -c --arg n "$2" '. + [$n]' <<<"$skipped"); }
 for f in "${files[@]}"; do
-  [ -f "$f" ] || { sdlc_log "skipping missing file $f"; continue; }
+  [ -f "$f" ] || { skip missing "$f"; continue; }
   row=$(jq -c --arg f "${f##*/}" '
     def num: if type=="number" then . else (tonumber? // 0) end;
+    def str: if . == null then null else tostring end;
     (if type=="array" then ([.[] | select(.type=="result")] | last // {}) else . end) as $r
-    | {file: $f, cost_usd: (($r.total_cost_usd // 0)|num), turns: (($r.num_turns // 0)|num), duration_ms: (($r.duration_ms // 0)|num),
-       recorded_at: ($r.recorded_at // null), pr: ($r.pr // null), session: ($r.session_id // $r.run_id // null)}' "$f" 2>/dev/null) || { sdlc_log "skipping unreadable file $f"; continue; }
+    | {file: $f, cost_usd: (($r.total_cost_usd // 0)|num), turns: (($r.num_turns // 0)|num),
+       duration_ms: (($r.duration_ms // 0)|num), recorded_at: ($r.recorded_at // null),
+       pr: ($r.pr // null), run_id: ($r.run_id|str), session_id: ($r.session_id|str),
+       session: ($r.session_id // $r.run_id // null)}' "$f" 2>/dev/null) \
+    || { skip unreadable "$f"; continue; }
   rows=$(jq -c --argjson r "$row" '. + [$r]' <<<"$rows")
 done
 
-summary=$(jq -c --arg th "${threshold:-}" --arg now "$(sdlc_iso_now)" '
-  { generated_at: $now, runs: length,
+summary=$(jq -c --arg th "${threshold:-}" --arg now "$(sdlc_iso_now)" --argjson skipped "$skipped" '
+  { generated_at: $now, runs: length, skipped: $skipped,
     total_cost_usd: ([.[].cost_usd] | add // 0),
     avg_cost_usd: (if length > 0 then (([.[].cost_usd] | add) / length) else 0 end),
     max_cost_usd: ([.[].cost_usd] | max // 0),

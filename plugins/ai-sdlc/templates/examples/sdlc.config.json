@@ -15,13 +15,16 @@
   },
   "commands": {
     "verify": "pnpm verify",
+    "verifySetup": "pnpm install --frozen-lockfile",
     "format": "pnpm prettier --write",
-    "lint": "pnpm eslint"
+    "lint": "pnpm eslint",
+    "deployStaging": "pnpm run deploy:staging",
+    "deployProduction": "pnpm run deploy:production"
   },
   "environments": {
     "dev": { "gate": "none" },
     "staging": { "gate": "auto" },
-    "prod": { "gate": "human", "approvers": ["release-managers"], "deployCommandPatterns": ["git push * main", "az pipelines run *", "kubectl apply *", "helm upgrade *", "terraform apply *"] }
+    "prod": { "gate": "human", "approvers": ["release-managers"], "deployCommandPatterns": ["git push * main", "az pipelines run *", "kubectl apply *", "helm upgrade *", "terraform apply *", "pnpm run deploy:production", "pnpm run deploy:production*"] }
   },
   "team": {
     "mode": "team",

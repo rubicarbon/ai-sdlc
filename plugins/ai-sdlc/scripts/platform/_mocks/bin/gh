@@ -2,10 +2,23 @@
 # Mock GitHub CLI for conformance tests and --dry-run. Answers the subset of `gh`
 # the GitHub adapter uses, keeps a little state under $SDLC_MOCK_STATE so ids
 # increment and repeated links/protection are observable, and logs every call.
+#
+# Knobs (environment):
+#   SDLC_MOCK_CHECKS=pass|fail|pending|empty|skipped   what `pr checks` reports
+#   SDLC_MOCK_FAIL="<subcommand prefix>"     e.g. "pr list": print an error, exit 1
+#   SDLC_MOCK_MALFORMED="<subcommand prefix>" print "{not json" and exit 0
+#   SDLC_MOCK_EMPTY="<subcommand prefix>"     print [] and exit 0
+#   SDLC_MOCK_GH_NO_DEPS=1                    the dependencies API answers 404
 set -u
 S="${SDLC_MOCK_STATE:-${TMPDIR:-/tmp}/ai-sdlc-mock-state}"; mkdir -p "$S"
 [ -n "${SDLC_MOCK_LOG:-}" ] && printf 'gh %s\n' "$*" >>"$SDLC_MOCK_LOG"
 REPO="mock-org/mock-repo"
+all="$*"
+if [ -n "${SDLC_MOCK_FAIL:-}" ] && [[ "$all" == "$SDLC_MOCK_FAIL"* ]]; then
+  echo "gh: simulated failure of 'gh $SDLC_MOCK_FAIL' (HTTP 502)" >&2; exit 1
+fi
+if [ -n "${SDLC_MOCK_MALFORMED:-}" ] && [[ "$all" == "$SDLC_MOCK_MALFORMED"* ]]; then echo "{not json"; exit 0; fi
+if [ -n "${SDLC_MOCK_EMPTY:-}" ] && [[ "$all" == "$SDLC_MOCK_EMPTY"* ]]; then echo "[]"; exit 0; fi
 next_id() { local f="$S/$1.counter" n=0; [ -f "$f" ] && n=$(<"$f"); n=$((n+1)); echo "$n" >"$f"; echo "$n"; }
 arg_after() { local k="$1"; shift; while [ $# -gt 0 ]; do if [ "$1" = "$k" ]; then echo "${2:-}"; return; fi; shift; done; }
 has_flag() { local k="$1"; shift; for a in "$@"; do [ "$a" = "$k" ] && return 0; done; return 1; }
@@ -42,9 +55,12 @@ case "${1:-} ${2:-}" in
   "pr comment")
     c=$(next_id comment); echo "https://github.com/$REPO/pull/$3#issuecomment-$c"; exit 0 ;;
   "pr checks")
+    # Like the real CLI: JSON on stdout, exit 1 when a check failed, 8 while pending.
     case "${SDLC_MOCK_CHECKS:-pass}" in
       fail) echo '[{"name":"ci","state":"FAILURE","link":"https://github.com/mock-org/mock-repo/actions/runs/1"},{"name":"lint","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/2"}]'; exit 1 ;;
       pending) echo '[{"name":"ci","state":"PENDING","link":"https://github.com/mock-org/mock-repo/actions/runs/1"}]'; exit 8 ;;
+      empty) echo '[]'; exit 0 ;;
+      skipped) echo '[{"name":"ci","state":"SKIPPED","link":"https://github.com/mock-org/mock-repo/actions/runs/1"},{"name":"lint","state":"SKIPPED","link":"https://github.com/mock-org/mock-repo/actions/runs/2"}]'; exit 0 ;;
       *) echo '[{"name":"ci","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/1"},{"name":"lint","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/2"}]'; exit 0 ;;
     esac ;;
   "pr list")

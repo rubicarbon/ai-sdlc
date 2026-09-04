@@ -12,7 +12,7 @@ Three scripts, one Python renderer, no LLM in the numbers. The narrative comes a
 | `scripts/metrics/baseline.sh [--since] [--platform] [--force]` | exports the 90 days before the loop was installed; refuses once Tier 1 artifacts exist (tier 1 or above, `REVIEW.md`, `docs/agents/issue-tracker.md`, published features, an existing baseline) unless `--force`, which stamps `LATE BASELINE` into the JSON and the report | `baseline-<date>.json`, `baseline-<date>.md` |
 | `scripts/metrics/collect.sh [--since] [--until] [--platform] [--baseline]` | exports the period (default 30 days), picks the newest baseline, reads `cost/` for spend, renders the report | `raw-<since>_<until>.json`, `report-<since>_<until>.md` |
 | `scripts/metrics/report.py raw.json [--baseline f] [--cost-dir d] [--out f] [--json]` | computes and renders; `--json` prints the numbers instead of Markdown | the report |
-| `scripts/cost/report.sh [--threshold USD] [--out f] [--md] <result.json>...` | sums Claude Code result files; exit 1 over the threshold | `cost/<name>.json` when `--out` points there |
+| `scripts/cost/report.sh [--threshold USD] [--out f] [--md] <result.json>...` | sums Claude Code result files; exit 1 over the threshold; unreadable inputs are listed under `skipped` in the summary and must be reported, never ignored | `cost/<name>.json` when `--out` points there |
 
 Both exports go through `sdlc-platform metrics_export <since> <until> <out>`, so the raw file has the same shape on GitHub and Azure DevOps: `prs[]`, `deployments[]`, `incidents[]`, `reverts[]`. Python 3 is required for these scripts only.
 
@@ -38,7 +38,7 @@ Speed without these is a trade, not a win. Each row of the report says how it wa
 | Review latency (p50) | PR `created_at` to `first_review_at` |
 | Code churn | total lines changed per week |
 | Defect escape rate | incidents over successful deployments (each postmortem's escaped stage names where it should have stopped) |
-| Cost per merged PR | total from `cost/` over merged PRs; `n/a` until cost files exist |
+| Cost per merged PR | total from `cost/` over merged PRs, after every file is reduced to canonical run records deduplicated by `run_id`, then `session_id`, then a documented composite key (a `report.sh` summary contributes its `runs_detail` rows, never also its total); `n/a` until cost files exist; malformed files appear in the report's Data quality section |
 
 ## Honesty rules
 
@@ -48,5 +48,6 @@ Speed without these is a trade, not a win. Each row of the report says how it wa
 4. A speed metric that improved while a counterweight worsened is reported as a trade, with both numbers side by side.
 5. Deltas against the baseline are shown only where both sides have a value; `n/a` stays `n/a`.
 6. No praise, no blame: systems and signals only. Keep the narrative under 300 words, numbers in tables.
+7. A source that is not configured (for example no deploy pipeline on Azure) is reported as `source not configured`, never as zero deployments; the report's Data quality section and the export's `sources` and `warnings` fields say which.
 
 Commands: `/ai-sdlc:sdlc-metrics-baseline` before Tier 1, `/ai-sdlc:sdlc-metrics-report` each period.

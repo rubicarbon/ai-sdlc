@@ -1,8 +1,11 @@
 # ai-sdlc: agent review of every pull request into {{REPO_DEFAULT_BRANCH}}, inside the pipeline,
 # with cost caps. Rendered by /ai-sdlc:sdlc-init for {{AZURE_PROJECT}}/{{AZURE_REPO}} (plugin {{PLUGIN_VERSION}}).
-# Requires the variable group "sdlc-secrets" with ANTHROPIC_API_KEY (created by
-# scripts/sdlc-setup-wizard.sh) and the build service's permission to contribute to PRs.
-# The review is advisory: branch policies still require a human required reviewer.
+# Requires the variable group "sdlc-secrets" with ANTHROPIC_API_KEY (see docs/PLATFORM-SETUP.md)
+# and the build service's permission to contribute to PRs.
+# The review is advisory: branch policies still require a human required reviewer. The job
+# itself fails closed: when the review does not complete (error, exhausted caps, no report),
+# scripts/ci/azure-review.sh exits 1, the diagnostic is posted instead of a review, and the
+# build policy shows the failure rather than a missing review.
 trigger: none
 
 pr:
@@ -41,41 +44,34 @@ steps:
       set -euo pipefail
       base="$(System.PullRequest.TargetBranch)"; base="${base#refs/heads/}"
       git fetch origin "$base" --depth=200
-      cat > prompt.txt <<'PROMPT'
-      You are reviewing a pull request in a repository that runs the ai-sdlc loop.
-      1. Load the skill ai-sdlc:sdlc-security-review and read REVIEW.md. Audit `git diff origin/BASE...HEAD` with the check list; rank Blocking / Important / Nit; respect the nit cap.
-      2. Find the ticket id (AB#n) in the PR title or body; if the spec or ticket is in .sdlc/features/ or .scratch/, list requirements that are missing, partial, or not asked for.
-      3. Write the full review to the file review.md in the sdlc-security-review report format, followed by a "Spec compliance" section, ending with: "Advisory review by ai-sdlc; a human required reviewer approves."
-      Do not edit any other file.
-      PROMPT
-      sed -i "s/BASE/$base/" prompt.txt
-      claude -p "$(cat prompt.txt)" --output-format json \
+      plugin=$(ls -d "$HOME"/.claude/plugins/cache/ai-sdlc-kit/ai-sdlc/*/ | head -n1)
+      bash "$plugin/scripts/ci/azure-review.sh" --base "$base" \
         --max-turns "$(SDLC_MAX_TURNS)" --max-budget-usd "$(SDLC_MAX_BUDGET_USD)" \
-        --allowedTools "Read,Grep,Glob,Write(review.md),Bash(git diff *),Bash(git log *),Bash(git show *)" \
-        > claude-result.json || true
-      test -s review.md || printf '# Security review\n\nThe review did not complete within the configured caps (turns %s, budget %s USD). Re-run or raise the caps in sdlc.config.json.\n' "$(SDLC_MAX_TURNS)" "$(SDLC_MAX_BUDGET_USD)" > review.md
+        --out review.md --result claude-result.json --status review-status.txt
     displayName: Review with Claude Code (ai-sdlc security review + spec compliance)
     env:
       ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
 
   - script: |
       set -euo pipefail
-      plugin=$(ls -d "$HOME"/.claude/plugins/cache/ai-sdlc-kit/ai-sdlc/*/ | head -n1)
-      SDLC_PLATFORM=azure "$plugin/bin/sdlc-platform" pr_comment "$(System.PullRequest.PullRequestId)" review.md
-    displayName: Post the review as a PR comment
-    env:
-      AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
-
-  - script: |
-      set -euo pipefail
       cost=$(jq -r '.total_cost_usd // 0' claude-result.json 2>/dev/null || echo 0)
       turns=$(jq -r '.num_turns // 0' claude-result.json 2>/dev/null || echo 0)
-      printf '{"run_id":"%s","pr":%s,"total_cost_usd":%s,"num_turns":%s,"recorded_at":"%s"}\n' \
-        "$(Build.BuildId)" "$(System.PullRequest.PullRequestId)" "$cost" "$turns" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > sdlc-cost.json
-      echo "##[section]ai-sdlc review cost: $cost USD in $turns turns (ceiling $(SDLC_MAX_BUDGET_USD) USD)"
+      status=$(cat review-status.txt 2>/dev/null || echo failed)
+      printf '{"run_id":"%s","pr":%s,"total_cost_usd":%s,"num_turns":%s,"review_status":"%s","recorded_at":"%s"}\n' \
+        "$(Build.BuildId)" "$(System.PullRequest.PullRequestId)" "${cost:-0}" "${turns:-0}" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > sdlc-cost.json
+      echo "##[section]ai-sdlc review cost: $cost USD in $turns turns (ceiling $(SDLC_MAX_BUDGET_USD) USD); review status: $status"
       awk -v c="$cost" -v m="$(SDLC_MAX_BUDGET_USD)" 'BEGIN { exit (c+0 > m+0) ? 1 : 0 }' || { echo "##vso[task.logissue type=error]review cost $cost USD exceeded the per-run ceiling"; exit 1; }
     displayName: Record cost and enforce the per-run ceiling
     condition: always()
+
+  - script: |
+      set -euo pipefail
+      plugin=$(ls -d "$HOME"/.claude/plugins/cache/ai-sdlc-kit/ai-sdlc/*/ | head -n1)
+      SDLC_PLATFORM=azure "$plugin/bin/sdlc-platform" pr_comment "$(System.PullRequest.PullRequestId)" review.md
+    displayName: Post the review (or the failure diagnostic) as a PR comment
+    condition: always()
+    env:
+      AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
 
   - publish: sdlc-cost.json
     artifact: sdlc-cost-$(Build.BuildId)

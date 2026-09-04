@@ -22,7 +22,8 @@ def validate($root; $path; $schema; $v):
   resolve($root; $schema) as $s
   | [
       (if $s.type != null and (($v | type_ok($s.type)) | not) then "\($path): expected \($s.type | tostring), got \($v | jtype)" else empty end),
-      (if $s.enum != null and (($s.enum | index([$v])) == null) then "\($path): must be one of \($s.enum | tostring), got \($v | tostring)" else empty end),
+      # scalar membership: index([$v]) would be an array-subsequence search, not "is $v listed"
+      (if $s.enum != null and (any($s.enum[]; . == $v) | not) then "\($path): must be one of \($s.enum | tostring), got \($v | tostring)" else empty end),
       (if ($s | has("const")) and $v != $s.const then "\($path): must be \($s.const | tostring)" else empty end),
       (if ($v | type) == "object" then
           ( ($s.required // [])[] as $k | select(($v | has($k)) | not) | "\($path).\($k): required" ),

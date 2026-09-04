@@ -12,7 +12,7 @@ Bring the managed files up to the installed plugin version without losing anyone
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/init/run.sh" --repo-dir . --check
    ```
 
-   Exit 0 with `result: clean` means nothing to do; say so and stop. Otherwise read `pending[]` (`status` is `template-changed` or `missing`) and `user_edited[]`.
+   Exit 0 with `result: clean` means nothing to do; say so and stop. Otherwise read `pending[]` (`status` is `template-changed` or `missing`; a `missing` entry whose `path` ends with `/` is an artifact directory that any run without `--check` re-creates) and `user_edited[]`. A `template-changed` file stays `template-changed` on every run until it is upgraded: the recorded hash only moves when a file is actually written.
 
 2. For each `template-changed` entry, render the new version to a scratch file and show the difference:
 
@@ -30,7 +30,7 @@ Bring the managed files up to the installed plugin version without losing anyone
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/init/run.sh" --repo-dir . --upgrade --only <path> [--only <path>...]
    ```
 
-   Without `--only`, `--upgrade` re-renders every template-changed file. `missing` files are re-created by any run without `--check`.
+   Without `--only`, `--upgrade` re-renders every template-changed file and re-creates every missing one. With `--only`, missing files not listed stay `missing` (reported, not created). The deploy workflow (`sdlc-deploy.yml`) is managed only while `commands.deployStaging` and `commands.deployProduction` are set in `sdlc.config.json`; without them it is skipped and `next_steps` says deployment automation was omitted.
 
 4. `user_edited[]` files are reported and kept. Explain that the template moved on but their edits win, and that `run.sh --force` overwrites them: a human runs that in their own terminal after backing up the file. Never run `--force` yourself.
 

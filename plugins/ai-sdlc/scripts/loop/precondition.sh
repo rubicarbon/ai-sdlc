@@ -10,6 +10,7 @@ set -u
 . "${0%/*}/../_root.sh" || exit 2
 . "$SDLC_PLUGIN_ROOT/scripts/_lib.sh"
 . "$SDLC_PLUGIN_ROOT/scripts/_project.sh"
+. "$SDLC_PLUGIN_ROOT/scripts/loop/_reports.sh"
 stage="${1:-}"; shift || true
 feature=""
 while [ $# -gt 0 ]; do case "$1" in --feature) feature="$2"; shift 2 ;; *) shift ;; esac; done
@@ -47,9 +48,12 @@ case "$stage" in
     git -C "$SDLC_PROJECT_DIR" rev-parse --verify HEAD >/dev/null 2>&1 || { echo "nothing committed yet"; exit 2; }
     exit 0 ;;
   ship)
-    latest=$(ls -t "$art"/verify/*.md 2>/dev/null | head -n1)
-    [ -n "$latest" ] || { echo "no verification report under $art/verify/: run /ai-sdlc:sdlc-verify"; exit 2; }
-    grep -qiE '^\**verdict:?\**:?\**[[:space:]]*\**pass' "$latest" || { echo "latest verification report ${latest##*/} is not a PASS"; exit 2; }
-    exit 0 ;;
+    # verification reports only (never *-security.md), newest first; the newest report bound
+    # to HEAD decides and must be a valid PASS (rules and reasons in scripts/loop/_reports.sh)
+    head=$(git -C "$SDLC_PROJECT_DIR" rev-parse HEAD 2>/dev/null) || { echo "nothing committed yet: a verification report is bound to a commit"; exit 2; }
+    if report=$(sdlc_select_verify_report "$art/verify" "$head"); then
+      echo "verification report ${report##*/} is a PASS for HEAD ${head:0:12}"; exit 0
+    fi
+    echo "$report"; exit 2 ;;
   *) sdlc_die 1 "precondition.sh <spec|tickets|build|verify|ship>" ;;
 esac
