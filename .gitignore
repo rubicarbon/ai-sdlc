@@ -1,7 +1,5 @@
 # dev-only scratch space (init dry runs, adapter mocks, eval fixtures)
 .dev/scratch/
-# kill switch for the repo boundary hook (see .dev/README.md)
-.dev/BOUNDARY_HOOK_DISABLED
 .dev/debug*.txt
 
 # Python bytecode (never part of the plugin package)

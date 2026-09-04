@@ -15,19 +15,5 @@
       "Read(//d/**)",
       "Edit(//d/**)"
     ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/guard-repo-boundary.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
   }
 }
