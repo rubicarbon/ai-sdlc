@@ -28,8 +28,8 @@ sdlc__glob_to_ere() {
           if [ "${g:$i:3}" = '**/' ]; then out="$out(.*/)?"; i=$((i+3)); continue; fi
           out="$out.*"; i=$((i+2)); continue
         fi
-        out="$out[^/]*" ;;
-      '?') out="$out[^/]" ;;
+        out="${out}[^/]*" ;;
+      '?') out="${out}[^/]" ;;
       '.'|'+'|'('|')'|'|'|'^'|'$'|'{'|'}'|'['|']'|'\\') out="$out\\$c" ;;
       *) out="$out$c" ;;
     esac
