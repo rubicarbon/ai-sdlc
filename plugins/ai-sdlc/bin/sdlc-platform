@@ -66,10 +66,10 @@ if [ -z "$platform" ]; then
   SDLC_PROJECT_OPTIONAL=1 . "$SDLC_PLUGIN_ROOT/scripts/_project.sh"
   if [ -n "${SDLC_CONFIG:-}" ]; then platform=$(sdlc_config '.platform' ''); fi
 fi
+# shellcheck disable=SC2010 # The directory listing is intentionally filtered to public adapters.
 case "$platform" in
   ''|both|auto) platform=$(bash "$SDLC_PLUGIN_ROOT/scripts/platform/_detect.sh") || sdlc_die 3 "cannot determine the platform: pass --platform github|azure" ;;
   none) sdlc_die 3 "not supported on this platform: 'none' means local artifacts only (no tracker, no PRs)" ;;
-  # shellcheck disable=SC2010 # The directory listing is intentionally filtered to public adapters.
   *) [ -d "$SDLC_PLUGIN_ROOT/scripts/platform/$platform" ] || sdlc_die 2 "unknown platform '$platform' (available: $(ls "$SDLC_PLUGIN_ROOT/scripts/platform" | grep -v '^_' | grep -v '\.' | paste -sd' '))" ;;
 esac
 
