@@ -24,7 +24,7 @@
   "environments": {
     "dev": { "gate": "none" },
     "staging": { "gate": "auto" },
-    "prod": { "gate": "human", "approvers": ["release-managers"], "deployCommandPatterns": ["git push * main", "az pipelines run *", "kubectl apply *", "helm upgrade *", "terraform apply *", "pnpm run deploy:production", "pnpm run deploy:production*"] }
+    "prod": { "gate": "human", "approvers": ["release-managers"], "deployCommandPatterns": ["git push * main", "pnpm run deploy:production", "pnpm run deploy:production*"] }
   },
   "team": {
     "mode": "team",
@@ -42,10 +42,8 @@
     "alertThresholdUsd": 25
   },
   "guardrails": {
-    "requireTicket": true,
-    "protectedPaths": [".github/workflows/**", ".azuredevops/**", "CODEOWNERS", "sdlc.config.json", ".claude/settings.json", "pnpm-lock.yaml"],
-    "secretPaths": [".env", ".env.*", "secrets/**", "**/*.pem"],
-    "testGlobs": ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**", "**/tests/**"]
+    "protectedPaths": [".azuredevops/**"],
+    "secretPaths": [".env", ".env.*", "secrets/**", "**/*.key", "**/*-key.pem"]
   },
   "artifacts": {
     "dir": ".sdlc"

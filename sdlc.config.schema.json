@@ -11,7 +11,7 @@
     "version": { "const": 1, "description": "Config format version." },
     "pluginVersion": { "type": "string", "description": "ai-sdlc version that last rendered this repository; /sdlc-upgrade compares against it." },
     "platform": { "type": "string", "enum": ["github", "azure", "both", "none"], "description": "Where work items and pull requests live. 'none' keeps artifacts local." },
-    "tier": { "type": "integer", "minimum": 0, "maximum": 3, "description": "0 foundation, 1 artifacts, 2 guardrails, 3 automation. Each tier requires the ones below it." },
+    "tier": { "type": "integer", "minimum": 0, "maximum": 3, "description": "0 foundation, 1 artifacts, 2 review policy (branch protection, CODEOWNERS, REVIEW.md), 3 automation. Each tier requires the ones below it." },
     "repo": {
       "type": "object", "additionalProperties": false,
       "properties": {
@@ -32,9 +32,9 @@
       "required": ["verify"],
       "properties": {
         "verify": { "type": "string", "minLength": 1, "description": "The one command that proves the code works." },
-        "verifySetup": { "type": "string", "description": "Command run inside the isolated verification worktree before commands.verify, for example a dependency install." },
-        "format": { "type": "string", "description": "Formatter invoked with the edited file as its last argument." },
-        "lint": { "type": "string", "description": "Linter invoked with the edited file as its last argument; non-zero exit is shown to the agent." },
+        "verifySetup": { "type": "string", "description": "Command scripts/verify/run-isolated.sh runs inside the disposable worktree before commands.verify when the verifier uses it, for example a dependency install." },
+        "format": { "type": "string", "description": "Formatter the agent runs after a coherent change and before finishing; nothing runs per edit." },
+        "lint": { "type": "string", "description": "Linter the agent runs after a coherent change and before finishing; nothing runs per edit." },
         "deployStaging": { "type": "string", "description": "Shell command the generated deploy workflow runs for that environment; SDLC_ENVIRONMENT and SDLC_SHA are exported." },
         "deployProduction": { "type": "string", "description": "Shell command the generated deploy workflow runs for that environment; SDLC_ENVIRONMENT and SDLC_SHA are exported." }
       }
@@ -74,12 +74,12 @@
     "guardrails": {
       "type": "object", "additionalProperties": false,
       "properties": {
-        "requireTicket": { "type": "boolean", "description": "Deny source edits without .sdlc/ACTIVE_TICKET. Defaults to true from tier 2." },
-        "protectedPaths": { "type": "array", "items": { "type": "string" } },
-        "secretPaths": { "type": "array", "items": { "type": "string" } },
-        "testGlobs": { "type": "array", "items": { "type": "string" } },
-        "ticketFreePaths": { "type": "array", "items": { "type": "string" }, "description": "Extra globs editable without an active ticket (docs and artifacts already are)." },
-        "verifyExtensions": { "type": "array", "items": { "type": "string" }, "description": "File extensions post-edit-verify runs the formatter and linter on." }
+        "requireTicket": { "type": "boolean", "description": "Deprecated: accepted for compatibility, enforced by nothing (the ticket gate hook was removed); safe to delete." },
+        "protectedPaths": { "type": "array", "items": { "type": "string" }, "description": "Globs the agent may not modify. Nothing by default; <artifacts>/UNLOCK_PROTECTED and <artifacts>/release/** are always protected. Absent and [] both mean no extra entries." },
+        "secretPaths": { "type": "array", "items": { "type": "string" }, "description": "Globs the guard-secrets hook treats as secret material. Absent: the plugin defaults (with the .env.example exemption); []: only the fixed home-directory credential paths; a list replaces the defaults and is applied literally. Configures the hook only; the deny rules in .claude/settings.json are separate (see docs/SECURITY.md)." },
+        "testGlobs": { "type": "array", "items": { "type": "string" }, "description": "Deprecated: accepted for compatibility, enforced by nothing (the test-freeze hook was removed); safe to delete." },
+        "ticketFreePaths": { "type": "array", "items": { "type": "string" }, "description": "Deprecated: accepted for compatibility, enforced by nothing (the ticket gate hook was removed); safe to delete." },
+        "verifyExtensions": { "type": "array", "items": { "type": "string" }, "description": "Deprecated: accepted for compatibility, enforced by nothing (the per-edit format/lint hook was removed); safe to delete." }
       }
     },
     "artifacts": {
@@ -130,7 +130,7 @@
       "properties": {
         "gate": { "type": "string", "enum": ["none", "auto", "human"] },
         "approvers": { "type": "array", "items": { "type": "string" } },
-        "deployCommandPatterns": { "type": "array", "items": { "type": "string" }, "description": "Shell command globs that gate-production.sh treats as production-affecting." }
+        "deployCommandPatterns": { "type": "array", "items": { "type": "string" }, "description": "Shell command globs that gate-production.sh treats as production-affecting. No built-in defaults: absent or [] gates nothing. Only environments.prod is read by the hook." }
       }
     }
   }

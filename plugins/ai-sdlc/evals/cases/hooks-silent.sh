@@ -37,6 +37,7 @@ for hook in "$P"/hooks/*.sh; do
   [ "$(head -n1 "$hook")" = "#!/usr/bin/env bash" ] && _ok "${hook##*/} has a bash shebang" || _fail "${hook##*/} shebang" "$(head -n1 "$hook")"
 done
 # hooks.json has the outer wrapper and every script it names exists
-jq -e '.hooks.PreToolUse and .hooks.PostToolUse' "$P/hooks/hooks.json" >/dev/null && _ok 'hooks.json has the outer "hooks" wrapper' || _fail "hooks.json wrapper" ""
+jq -e '.hooks.PreToolUse and (.hooks.PostToolUse == null)' "$P/hooks/hooks.json" >/dev/null && _ok 'hooks.json has the outer "hooks" wrapper and no PostToolUse hooks' || _fail "hooks.json wrapper" ""
+assert_eq "4" "$(ls "$P"/hooks/*.sh | wc -l | tr -d ' ')" "four hook scripts ship with the plugin"
 while IFS= read -r s; do f="$P/${s#\$\{CLAUDE_PLUGIN_ROOT\}/}"; [ -f "$f" ] && _ok "hooks.json references existing ${s##*/}" || _fail "hooks.json references missing script" "$s"; done < <(jq -r '.hooks[][].hooks[].args[0]' "$P/hooks/hooks.json")
 eval_done

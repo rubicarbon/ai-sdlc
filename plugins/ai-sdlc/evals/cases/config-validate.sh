@@ -41,6 +41,12 @@ for r in plugin editable absent; do good ".reuse.mattpocockSkills=\"$r\"" "reuse
 good '.commands.verifySetup="pnpm install --frozen-lockfile"' "commands.verifySetup"
 good '.commands.deployStaging="make deploy" | .commands.deployProduction="make deploy-prod"' "commands.deploy*"
 good 'del(.commands.verifySetup) | del(.commands.deployStaging) | del(.commands.deployProduction)' "optional commands absent"
+good '.guardrails.requireTicket=true | .guardrails.testGlobs=["**/*.test.ts"] | .guardrails.ticketFreePaths=["docs/**"] | .guardrails.verifyExtensions=["ts"]' "deprecated guardrails keys are still accepted (inert)"
+good '.guardrails={}' "empty guardrails block"
+good 'del(.guardrails)' "no guardrails block"
+good '.guardrails.protectedPaths=[] | .guardrails.secretPaths=[]' "explicit empty guardrail lists"
+good '.environments.prod.deployCommandPatterns=[]' "explicit empty production patterns"
+good 'del(.environments.prod.deployCommandPatterns)' "absent production patterns"
 bad '.commands.verifySetup=1'            'commands.verifySetup: expected string'  'verifySetup type'
 
 # a freshly generated config validates

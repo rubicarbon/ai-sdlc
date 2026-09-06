@@ -33,7 +33,14 @@
 # --deploy-production) unless --no-deploy skips the deploy template; a plain re-run without
 # them skips the template and says so in next_steps. The production command (exact string and
 # "<command>*") is always added to environments.prod.deployCommandPatterns so the
-# gate-production hook covers it.
+# gate-production hook covers it; on init that list starts with "git push * <default branch>"
+# and nothing else (the hook has no built-in patterns). sdlc.config.json content is never
+# rewritten by --upgrade: patterns an earlier plugin version seeded stay until edited by hand.
+# .claude/settings.json: permission fragments are merged (union, never clobber). Deny rules an
+# earlier plugin version rendered and the current templates no longer emit
+# (SETTINGS_OBSOLETE_DENY) are removed by --upgrade / --force only, never on a first run; a
+# plain re-run reports them as template-changed. The strings are matched literally, so a rule a
+# user typed with the same text is removed too; every removed rule is listed on stderr.
 # Output: one JSON summary on stdout; human-readable notes on stderr.
 set -u
 . "${0%/*}/../_root.sh" || exit 2
@@ -90,7 +97,7 @@ if [ -f sdlc.config.json ]; then
   bash "$SDLC_PLUGIN_ROOT/scripts/config/validate.sh" sdlc.config.json --quiet || sdlc_die 1 "existing sdlc.config.json is invalid; fix it before re-running"
   config=$(<sdlc.config.json)
   [ -n "$platform" ] && [ "$platform" != "$(jq -r .platform <<<"$config")" ] && note "ignoring --platform: sdlc.config.json already says $(jq -r .platform <<<"$config") (edit the file to change it)"
-  [ -n "$tier" ] && [ "$tier" != "$(jq -r .tier <<<"$config")" ] && { config=$(jq -c --argjson t "$tier" '.tier=$t | .guardrails.requireTicket = ($t >= 2)' <<<"$config"); mode=retier; note "tier changed to $tier (guardrails.requireTicket follows the tier)"; }
+  [ -n "$tier" ] && [ "$tier" != "$(jq -r .tier <<<"$config")" ] && { config=$(jq -c --argjson t "$tier" '.tier=$t' <<<"$config"); mode=retier; note "tier changed to $tier"; }
 else
   [ -n "$platform" ] || platform=$(jq -r .platform <<<"$detected")
   [ -n "$tier" ] || tier=0
@@ -109,16 +116,18 @@ else
   fi
   reuse=$(jq -r 'if .mattpocock.installed then "plugin" elif (.mattpocock.editable_copies|length)>0 then "editable" else "absent" end' <<<"$detected")
   mp_ver=$(jq -r '.mattpocock.installed_version // empty' <<<"$detected")
+  # environment names are canonicalised to the three keys the schema and the hook know
+  # (dev, staging, prod); the production gate starts with a push to the default branch only
   IFS=',' read -ra env_list <<<"$envs"
   env_json='{}'
+  default_branch=$(jq -r '.defaultBranch | if . == null or . == "" then "main" else . end' <<<"$detected")
   for e in "${env_list[@]}"; do
     e="${e// /}"; [ -n "$e" ] || continue
     case "$e" in
-      prod|production)
-        case "$platform" in github) cli_pat='["gh workflow run *deploy*","gh release create *"]' ;; azure) cli_pat='["az pipelines run *","az pipelines release *"]' ;; *) cli_pat='["gh workflow run *deploy*","az pipelines run *"]' ;; esac
-        env_json=$(jq -c --arg e "$e" --argjson cli "$cli_pat" '.[$e]={gate:"human",approvers:[],deployCommandPatterns:(["git push * main","git push * master","git push * release/*"] + $cli + ["kubectl apply *","helm upgrade *","terraform apply *"])}' <<<"$env_json") ;;
-      staging|stage|preprod) env_json=$(jq -c --arg e "$e" '.[$e]={gate:"auto"}' <<<"$env_json") ;;
-      *) env_json=$(jq -c --arg e "$e" '.[$e]={gate:"none"}' <<<"$env_json") ;;
+      prod|production) env_json=$(jq -c --arg b "$default_branch" '.prod={gate:"human",approvers:[],deployCommandPatterns:["git push * " + $b]}' <<<"$env_json") ;;
+      staging|stage|preprod) env_json=$(jq -c '.staging={gate:"auto"}' <<<"$env_json") ;;
+      dev|development) env_json=$(jq -c '.dev={gate:"none"}' <<<"$env_json") ;;
+      *) sdlc_die 2 "run.sh: --envs accepts dev, staging and prod (also development, stage, preprod, production); got '$e'" ;;
     esac
   done
   config=$(jq -cn \
@@ -139,7 +148,6 @@ else
       team: {mode: $team, enablePluginForTeam: ($team == "team"), codeowners: ("@" + $owner), securityOwners: ("@" + $owner)},
       review: {requiredApprovals: 1, nitCap: 5},
       cost: {maxTurns: ($mt|tonumber), maxBudgetUsd: ($mb|tonumber), alertThresholdUsd: ($at|tonumber)},
-      guardrails: {requireTicket: ($tier >= 2)},
       artifacts: {dir: ".sdlc"},
       metrics: {incidentLabel: "incident", deployEnvironment: "production", maxPrs: 200},
       github: {requiredChecks: ["sdlc-pr-review"], deployWorkflow: "sdlc-deploy.yml"},
@@ -279,7 +287,13 @@ claude_md() {
   fi
 }
 
-# settings: merge fragments, never clobber
+# Deny rules earlier plugin versions rendered into .claude/settings.json and the current
+# templates no longer emit. --upgrade / --force remove them (literal match, so a user-typed rule
+# with the same text goes too; each removal is printed); a plain re-run reports them as
+# template-changed; a first run never prunes (every rule already there is the user's).
+SETTINGS_OBSOLETE_DENY=("Edit(sdlc.config.json)" "Edit(.env.*)" "Read(**/*.pem)" "Read(**/id_rsa*)" "Read(**/id_ed25519*)")
+
+# settings: merge fragments (union, never clobber), prune obsolete plugin rules on upgrade
 settings_merge() {
   local frags=() f tmp
   for f in settings.json.tmpl "settings.$primary.json.tmpl"; do
@@ -289,18 +303,36 @@ settings_merge() {
   if [ "$team" = team ] && [ "$(jq -r '.team.enablePluginForTeam // false' <<<"$config")" = true ]; then
     tmp=$(sdlc_tmpfile .json); bash "$RENDER" "$T/settings.team.json.tmpl" --config "$cfg_tmp" --out "$tmp" || sdlc_die 1 "rendering settings.team.json.tmpl failed"; frags+=("$tmp")
   fi
-  local before after
+  local before merged pruned removed status rendered_rules target r
   before=$( [ -f .claude/settings.json ] && jq -c . .claude/settings.json || echo '{}')
-  after=$(bash "$SDLC_PLUGIN_ROOT/scripts/init/merge-settings.sh" .claude/settings.json "${frags[@]}" --dry-run | jq -c .)
+  rendered_rules=$(jq -sc '[.[].permissions.deny[]?] | unique' "${frags[@]}")
+  merged=$(bash "$SDLC_PLUGIN_ROOT/scripts/init/merge-settings.sh" .claude/settings.json "${frags[@]}" --dry-run | jq -c .)
   rm -f "${frags[@]}"
-  if [ "$before" = "$after" ]; then add_status .claude/settings.json unchanged settings.json.tmpl
+  pruned=$(jq -c 'if (.permissions.deny | type) == "array" then .permissions.deny -= $ARGS.positional else . end' --args "${SETTINGS_OBSOLETE_DENY[@]}" <<<"$merged")
+  removed=$(jq -r --argjson m "$merged" '($m.permissions.deny // []) - (.permissions.deny // []) | .[]' <<<"$pruned")
+  status=$( [ -f .claude/settings.json ] && echo merged || echo installed )   # decided before any write
+  # first adoption never prunes: every rule already in the file was written by the user
+  target="$merged"; [ $mode = init ] || target="$pruned"
+  record_rules() {  # the manifest records what this version put in the file, for a later prune
+    [ $check = 1 ] || [ $dry = 1 ] || recorded=$(jq -c --argjson r "$rendered_rules" '.[".claude/settings.json"]={template:"settings.json.tmpl",rules:$r}' <<<"$recorded")
+  }
+  write_settings() {  # write_settings <json> : install it, unless this run writes nothing
+    [ $dry = 1 ] && return 0
+    mkdir -p .claude; jq . <<<"$1" >.claude/settings.json; writes=$((writes+1)); record_rules
+  }
+  if [ "$before" = "$target" ]; then add_status .claude/settings.json unchanged settings.json.tmpl; record_rules
   elif [ $check = 1 ]; then add_status .claude/settings.json template-changed settings.json.tmpl
-  else [ $dry = 1 ] || { mkdir -p .claude; jq . <<<"$after" >.claude/settings.json; writes=$((writes+1)); }; add_status .claude/settings.json "$( [ -f .claude/settings.json ] && echo merged || echo installed )" settings.json.tmpl
+  elif [ $mode = init ]; then write_settings "$merged"; add_status .claude/settings.json "$status" settings.json.tmpl
+  elif { [ $upgrade = 1 ] || [ $force = 1 ]; } && only_allows .claude/settings.json; then
+    write_settings "$pruned"; add_status .claude/settings.json "$status" settings.json.tmpl
+    [ -n "$removed" ] && [ $dry = 0 ] && while IFS= read -r r; do [ -n "$r" ] && note "removed obsolete deny rule from .claude/settings.json: $r"; done <<<"$removed"
+  elif [ "$merged" != "$pruned" ]; then add_status .claude/settings.json template-changed settings.json.tmpl
+  else write_settings "$merged"; add_status .claude/settings.json "$status" settings.json.tmpl
   fi
 }
 
 gitignore_lines() {
-  local want=("$art/ACTIVE_TICKET" "$art/FIX_MODE" "$art/UNLOCK_PROTECTED" "$art/release/" "$art/tmp/") l changed=0
+  local want=("$art/UNLOCK_PROTECTED" "$art/release/" "$art/tmp/") l changed=0
   for l in "${want[@]}"; do
     grep -qxF "$l" .gitignore 2>/dev/null && continue
     changed=1; [ $check = 1 ] || [ $dry = 1 ] || { [ -s .gitignore ] && [ "$(tail -c1 .gitignore | od -An -c | tr -d ' ')" != '\n' ] && echo >>.gitignore; echo "$l" >>.gitignore; }

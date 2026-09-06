@@ -3,13 +3,14 @@
 #
 #   run-isolated.sh [--ref <rev>] [--tail N]
 #
-# The sdlc-verifier and sdlc-security-auditor subagents may not run test runners, build tools
-# or scripts in the main checkout (hooks/guard-verifier-readonly.sh denies them). This helper
-# is the one sanctioned way to execute the project's commands.verify: it checks out <rev>
-# (default HEAD) into a fresh worktree under <artifacts>/tmp/ (or $SDLC_TMPDIR), runs the
-# optional commands.verifySetup and then commands.verify there, removes the worktree, and
-# proves that the main checkout is unchanged by comparing a fingerprint of HEAD, the index,
-# every tracked modification and every untracked, non-ignored file taken before and after.
+# The sdlc-verifier and sdlc-security-auditor subagents use this helper when the main checkout
+# is dirty (a PASS is release evidence only for HEAD) or when commands.verifySetup has to
+# install dependencies first; on a clean checkout they may run commands.verify directly. It
+# checks out <rev> (default HEAD) into a fresh worktree under <artifacts>/tmp/ (or
+# $SDLC_TMPDIR), runs the optional commands.verifySetup and then commands.verify there, removes
+# the worktree, and proves that the main checkout is unchanged by comparing a fingerprint of
+# HEAD, the index, every tracked modification and every untracked, non-ignored file taken
+# before and after.
 #
 # Output: one JSON line on stdout
 #   {"command","setup","ref","verified_sha","head","exit","log","tail":[...],

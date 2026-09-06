@@ -13,8 +13,8 @@ printf 'x\n' >"$proj/README.md"; ( cd "$proj" && git add -A >/dev/null && git co
 head=$(git -C "$proj" rev-parse HEAD); short="${head:0:7}"
 V="$proj/.sdlc/verify"; R="$proj/.sdlc/release"; mkdir -p "$V" "$R"
 
-report() {  # report <name> <verdict> <commit>
-  printf '# Verification: x\n\n**Verdict:** %s\n**Commit:** %s  **Base:** main  **Command:** `npm test` exit 0\n' "$2" "$3" >"$V/$1"
+report() {  # report <name> <verdict> <commit> [tree]
+  printf '# Verification: x\n\n**Verdict:** %s\n**Commit:** %s  **Base:** main  **Command:** `npm test` exit 0\n**Tree:** %s\n' "$2" "$3" "${4:-clean}" >"$V/$1"
 }
 security() {  # security <blocking> <name> : report with a Commit line for HEAD
   printf '# Security review: x against main\n**Commit:** %s  **Base:** main\n\nBlocking: %s  Important: 0  Nit: 0 (cap 5)\n' "$head" "$1" >"$V/$2"
@@ -84,6 +84,26 @@ report "2026-09-03-$short.md" PASS "0123456789abcdef0123456789abcdef01234567"
 run
 assert_eq "false" "$(gate_ok 'verification report PASS')" "PASS for another commit is red"
 assert_match 'not HEAD' "$(gate_ev 'verification report PASS')" "evidence names the mismatch"
+
+echo "-- (e2) the verified tree must be HEAD: Tree line required"
+printf '# Verification: x\n\n**Verdict:** PASS\n**Commit:** %s  **Base:** main\n' "$head" >"$V/2026-09-03-$short.md"
+run
+assert_eq "false" "$(gate_ok 'verification report PASS')" "PASS without a Tree line is red"
+assert_match 'verified tree is unknown' "$(gate_ev 'verification report PASS')" "evidence says the verified tree is unknown"
+printf '# Verification: x\n\n**Verdict:** PASS\n**Commit:** %s  **Base:** main\n**Tree:** clean\n**Tree:** isolated\n' "$head" >"$V/2026-09-03-$short.md"
+run
+assert_eq "false" "$(gate_ok 'verification report PASS')" "two Tree lines are red"
+assert_match '2 Tree lines' "$(gate_ev 'verification report PASS')" "evidence counts the Tree lines"
+printf '# Verification: x\n\n**Verdict:** PASS\n**Commit:** %s  **Base:** main\n**Tree:** dirty\n' "$head" >"$V/2026-09-03-$short.md"
+run
+assert_eq "false" "$(gate_ok 'verification report PASS')" "Tree: dirty is not a recognised tree, so red"
+report "2026-09-03-$short.md" PASS "$head" isolated
+run
+assert_eq "true" "$(gate_ok 'verification report PASS')" "Tree: isolated is green"
+assert_eq "0" "$(cd "$proj" && bash "$P/scripts/loop/validate-report.sh" "$V/2026-09-03-$short.md" >/dev/null 2>&1; echo $?)" "validate-report.sh accepts the isolated report"
+assert_match 'tree isolated' "$(cd "$proj" && bash "$P/scripts/loop/validate-report.sh" "$V/2026-09-03-$short.md" 2>&1)" "validate-report.sh names the tree"
+printf '# Verification: x\n\n**Verdict:** PASS\n**Commit:** %s  **Base:** main\n' "$head" >"$V/2026-09-03-$short.md"
+assert_eq "1" "$(cd "$proj" && bash "$P/scripts/loop/validate-report.sh" "$V/2026-09-03-$short.md" >/dev/null 2>&1; echo $?)" "validate-report.sh rejects a Tree-less PASS"
 
 echo "-- (f) newer security report than the PASS report"
 report "2026-09-03-$short.md" PASS "$head"

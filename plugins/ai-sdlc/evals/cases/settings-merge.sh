@@ -56,6 +56,7 @@ assert_eq '["Read(.env)","Read(secrets/**)","Bash(git push --force *)"]' "$(jq -
 assert_eq "Read(.env.local)" "$(jq -r '.permissions.deny[3]' "$target")" "new entries appended in fragment order"
 assert_eq "true" "$(jq '.permissions.deny | index("Read(~/.azure/**)") != null and index("Bash(rm -rf *)") != null' "$target")" "new unique entries from every fragment present"
 assert_eq '["Bash(npm test)","Bash(pnpm test)"]' "$(jq -c '.permissions.allow' "$target")" "allow list unioned"
+assert_eq "null" "$(jq '.permissions.deny | index("Edit(sdlc.config.json)")' "$target")" "the templates no longer emit Edit(sdlc.config.json) (the merge itself never removes anything)"
 assert_eq '[2,3,1]' "$(jq -c '.nested.deep.x' "$target")" "nested arrays unioned too (existing first)"
 
 echo "-- objects and scalars"

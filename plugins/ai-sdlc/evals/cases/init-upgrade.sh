@@ -75,6 +75,49 @@ assert_file "$repo/docs/agents/issue-tracker.md" "missing file installed"
 out=$(bash "$RUN" --repo-dir "$repo" --yes 2>/dev/null)
 assert_eq "already-initialised" "$(jq -r .result <<<"$out")" "everything up to date again"
 
+echo "-- obsolete plugin deny rules: reported on plain runs, pruned only by --upgrade"
+S="$repo/.claude/settings.json"
+obsolete='["Edit(sdlc.config.json)","Edit(.env.*)","Read(**/*.pem)","Read(**/id_rsa*)","Read(**/id_ed25519*)"]'
+jq --argjson o "$obsolete" '.permissions.deny += $o + ["Bash(rm -rf *)"] | .model = "opus"' "$S" >"$S.tmp" && mv "$S.tmp" "$S"
+legacy=$(jq -cS . "$S")
+out=$(bash "$RUN" --repo-dir "$repo" --check 2>/dev/null); rc=$?
+assert_eq "1" "$rc" "--check exits 1 while obsolete rules are present"
+assert_eq "template-changed" "$(status_of "$out" .claude/settings.json)" "--check reports settings template-changed"
+assert_eq "$legacy" "$(jq -cS . "$S")" "--check wrote nothing"
+out=$(bash "$RUN" --repo-dir "$repo" --yes 2>"$EVAL_TMP/err-prune"); rc=$?
+assert_eq "0" "$rc" "plain re-run exits 0"
+assert_eq "template-changed" "$(status_of "$out" .claude/settings.json)" "plain re-run reports template-changed"
+assert_eq "$legacy" "$(jq -cS . "$S")" "plain re-run does not prune"
+assert_match 'template-changed: .claude/settings.json' "$(cat "$EVAL_TMP/err-prune")" "stderr names settings.json"
+out=$(bash "$RUN" --repo-dir "$repo" --upgrade --only REVIEW.md --yes 2>/dev/null)
+assert_eq "template-changed" "$(status_of "$out" .claude/settings.json)" "--upgrade --only another file leaves settings pending"
+assert_eq "$legacy" "$(jq -cS . "$S")" "--upgrade --only another file does not prune"
+bash "$RUN" --repo-dir "$repo" --upgrade --dry-run --yes >/dev/null 2>&1
+assert_eq "$legacy" "$(jq -cS . "$S")" "--upgrade --dry-run writes nothing"
+# expected result: the stable merge (legacy plus the current fragments) followed by the prune
+frag_base="$EVAL_TMP/frag-base.json"; frag_gh="$EVAL_TMP/frag-gh.json"
+bash "$PC/scripts/init/render.sh" "$PC/templates/settings.json.tmpl" --config "$repo/sdlc.config.json" --out "$frag_base"
+bash "$PC/scripts/init/render.sh" "$PC/templates/settings.github.json.tmpl" --config "$repo/sdlc.config.json" --out "$frag_gh"
+expected=$(bash "$PC/scripts/init/merge-settings.sh" "$S" "$frag_base" "$frag_gh" --dry-run | jq -cS --argjson o "$obsolete" '.permissions.deny -= $o')
+out=$(bash "$RUN" --repo-dir "$repo" --upgrade --yes 2>"$EVAL_TMP/err-upgrade"); rc=$?
+assert_eq "0" "$rc" "--upgrade exits 0"
+assert_eq "merged" "$(status_of "$out" .claude/settings.json)" "--upgrade reports settings merged"
+assert_eq "$expected" "$(jq -cS . "$S")" "result is the merge followed by the prune (user rule, order and model kept)"
+assert_eq "0" "$(jq --argjson o "$obsolete" '[.permissions.deny[] | select(IN($o[]))] | length' "$S")" "obsolete rules removed"
+assert_eq "true" "$(jq '.permissions.deny | index("Bash(rm -rf *)") != null and index("Read(.env)") != null and index("Edit(.env.local)") != null' "$S")" "user rule and current plugin rules kept"
+assert_eq "opus" "$(jq -r .model "$S")" "other keys untouched"
+assert_eq "5" "$(grep -c 'removed obsolete deny rule' "$EVAL_TMP/err-upgrade")" "stderr lists each removed rule"
+assert_eq "$(jq -cS '[.permissions.deny[]?] | unique' "$frag_base" "$frag_gh" | jq -cs 'add | unique')" "$(jq -cS '.[".claude/settings.json"].rules' "$repo/.sdlc/managed-files.json")" "manifest records the rules this version rendered"
+out=$(bash "$RUN" --repo-dir "$repo" --yes 2>/dev/null)
+assert_eq "already-initialised" "$(jq -r .result <<<"$out")" "no obsolete rules left: plain run is already-initialised"
+assert_eq "0" "$(bash "$RUN" --repo-dir "$repo" --check >/dev/null 2>&1; echo $?)" "--check clean after the prune"
+
+echo "-- legacy production patterns in sdlc.config.json survive re-runs and upgrades"
+jq '.environments.prod.deployCommandPatterns += ["kubectl apply *","helm upgrade *"]' "$repo/sdlc.config.json" >"$repo/c.tmp" && mv "$repo/c.tmp" "$repo/sdlc.config.json"
+bash "$RUN" --repo-dir "$repo" --yes >/dev/null 2>&1
+bash "$RUN" --repo-dir "$repo" --upgrade --yes >/dev/null 2>&1
+assert_eq "true" "$(jq '.environments.prod.deployCommandPatterns | index("kubectl apply *") != null and index("helm upgrade *") != null' "$repo/sdlc.config.json")" "seeded patterns from an earlier version are kept (explicit configuration now)"
+
 echo "-- a user edit on top of a pending template change is still the user's"
 printf '\n## Ours\n' >>"$repo/REVIEW.md"
 printf '\n## Added by template D\n' >>"$PC/templates/REVIEW.md.tmpl"

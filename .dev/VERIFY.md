@@ -43,7 +43,7 @@ Expected: `ai-sdlc@ai-sdlc-kit` enabled, version `0.1.0`. Quick alternative: `cl
 claude plugin details ai-sdlc@ai-sdlc-kit
 ```
 
-Expected, each namespaced `ai-sdlc:`: commands `sdlc-init`, `sdlc-status`, `sdlc-upgrade`, `sdlc-start`, `sdlc-publish`, `sdlc-verify`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics-baseline`, `sdlc-metrics-report`; skills `sdlc-loop`, `sdlc-platform`, `sdlc-publish`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics`, `sdlc-security-review`; agents `sdlc-verifier`, `sdlc-security-auditor`, `sdlc-metrics-analyst`; hooks: `PreToolUse` in 3 matcher groups (6 scripts: `guard-secrets`, `guard-protected-paths`, `guard-verifier-readonly`, `guard-test-edits`, `guard-ticket-gate`, `gate-production`), `PostToolUse` in 1 group (`post-edit-verify`).
+Expected, each namespaced `ai-sdlc:`: commands `sdlc-init`, `sdlc-status`, `sdlc-upgrade`, `sdlc-start`, `sdlc-publish`, `sdlc-verify`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics-baseline`, `sdlc-metrics-report`; skills `sdlc-loop`, `sdlc-platform`, `sdlc-publish`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics`, `sdlc-security-review`; agents `sdlc-verifier`, `sdlc-security-auditor`, `sdlc-metrics-analyst`; hooks: `PreToolUse` in 4 matcher groups (4 scripts: `guard-secrets`, `guard-protected-paths`, `guard-verifier-readonly`, `gate-production`), no `PostToolUse` hooks.
 
 ### B3. Hooks fire with `${CLAUDE_PLUGIN_ROOT}` resolved
 
@@ -53,11 +53,11 @@ Create a throwaway sdlc project and run one session with a debug file:
 mkdir -p C:\Projects\ai-sdlc\.dev\scratch\gh && cd C:\Projects\ai-sdlc\.dev\scratch\gh && git init -q
 bash C:\Projects\ai-sdlc\plugins\ai-sdlc\scripts\init\run.sh --platform none --tier 1 --team solo --verify "true" --yes
 claude --debug-file .sdlc-debug.txt -p "Append the line 'verify' to NOTES.md and stop."
-grep -E 'guard-secrets|guard-protected-paths|guard-verifier-readonly|guard-test-edits|guard-ticket-gate|gate-production|post-edit-verify' .sdlc-debug.txt | head -20
+grep -E 'guard-secrets|guard-protected-paths|guard-verifier-readonly|gate-production' .sdlc-debug.txt | head -20
 grep -c 'CLAUDE_PLUGIN_ROOT}' .sdlc-debug.txt
 ```
 
-Expected: hook lines for all seven scripts under the plugin cache path; the second grep prints `0`; no `hook error`. Delete `.sdlc-debug.txt` afterwards.
+Expected: hook lines for all four scripts under the plugin cache path; the second grep prints `0`; no `hook error`. Delete `.sdlc-debug.txt` afterwards.
 
 ### B4. Silence and speed in an unrelated repository
 
@@ -70,9 +70,9 @@ grep -E 'hook error|BLOCKED|sdlc' .sdlc-debug.txt | grep -v 'ai-sdlc-kit\\ai-sdl
 
 Expected: nothing. `evals/cases/hooks-silent.sh` measures the silent path at under 80 ms over bash startup on the build machine.
 
-### B5. The shell guards and the verifier in a real session
+### B5. The guards and the verifier in a real session
 
-In a tier 2 sdlc project without `.sdlc/ACTIVE_TICKET`, ask the agent to run `sed -i s/a/b/ src/<file>` and `bash scripts/<any>.sh`: both must be denied with `ai-sdlc guardrail: no active ticket`. Ask it to run `cat src/<file>` and the configured verify command: both must run. Then `/ai-sdlc:sdlc-verify`: the verifier must call `bash "${CLAUDE_PLUGIN_ROOT}/scripts/verify/run-isolated.sh"` (visible in the transcript) and every direct test-runner attempt must be denied with a message naming the helper. Afterwards `git status --porcelain` in the project is empty and `git worktree list` shows one entry.
+In a tier 2 sdlc project with no marker file, ask the agent to run `sed -i s/a/b/ src/<file>`, `bash scripts/<any>.sh`, edit a test file and a lockfile, and run `npm install <pkg>`: all must run (no `ai-sdlc guardrail` line in the transcript). Ask it to `cat .env`: denied. Ask it to `git push origin main` (with `git push * main` in `environments.prod.deployCommandPatterns`): denied with a message naming `/ai-sdlc:sdlc-ship`; `kubectl apply -f x` with no such pattern configured: runs. Then `/ai-sdlc:sdlc-verify` on a clean checkout: the verifier runs the configured verify command directly, any attempt to edit a file is denied, and the saved report carries `**Tree:** clean`; `bash "${CLAUDE_PLUGIN_ROOT}/scripts/loop/validate-report.sh" <report>` exits 0. Repeat with an uncommitted change in the checkout: the verifier must use `run-isolated.sh` (visible in the transcript) and write `**Tree:** isolated`, or refuse to report a PASS; afterwards `git worktree list` shows one entry.
 
 ### B6. Release gates on a real project
 

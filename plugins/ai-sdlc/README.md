@@ -1,6 +1,6 @@
 # ai-sdlc
 
-Claude Code plugin that turns a software project into an AI-native SDLC workspace. It supplies the outer loop (a GitHub and Azure DevOps adapter behind one contract, deterministic hooks, read-only verifier and security-auditor subagents, CI review with cost caps, DORA metrics, evals) around the inner loop provided by the `mattpocock-skills` plugin (grill, spec, tickets, implement, tdd, code review).
+Claude Code plugin that turns a software project into an AI-native SDLC workspace. It supplies the outer loop (a GitHub and Azure DevOps adapter behind one contract, two targeted hooks for secrets and configured production commands, read-only verifier and security-auditor subagents, CI review with cost caps, DORA metrics, evals) around the inner loop provided by the `mattpocock-skills` plugin (grill, spec, tickets, implement, tdd, code review).
 
 ## Install
 
@@ -44,23 +44,20 @@ Claude Code plugin that turns a software project into an AI-native SDLC workspac
 
 | Agent | Does |
 | --- | --- |
-| `sdlc-verifier` | Fresh-context verifier: runs the verify command in a disposable worktree (`scripts/verify/run-isolated.sh`) and checks the acceptance criteria, reports with evidence; shell limited to a read-only allowlist by hook |
-| `sdlc-security-auditor` | Ranks security findings in a diff per `REVIEW.md`; same read-only allowlist by hook |
+| `sdlc-verifier` | Fresh-context verifier: runs the verify command against HEAD (directly on a clean checkout, or in a disposable worktree via `scripts/verify/run-isolated.sh`) and checks the acceptance criteria, reports with evidence; file edits denied by hook |
+| `sdlc-security-auditor` | Ranks security findings in a diff per `REVIEW.md`; file edits denied by hook |
 | `sdlc-metrics-analyst` | Turns metrics files into a short narrative with sample sizes |
 
 ### Hooks (`hooks/hooks.json`)
 
 | Hook | Event | Does |
 | --- | --- | --- |
-| `guard-secrets` | PreToolUse | Denies access to secret files and credential directories |
-| `guard-protected-paths` | PreToolUse | Denies edits to protected paths unless `.sdlc/UNLOCK_PROTECTED` exists |
-| `guard-verifier-readonly` | PreToolUse | Denies edits from the verifier and auditor agents and limits their shell to read-only commands plus the isolation helper |
-| `guard-test-edits` | PreToolUse | Denies test changes (file tools and shell) while `.sdlc/FIX_MODE` exists |
-| `guard-ticket-gate` | PreToolUse | Denies source changes (file tools and shell) without `.sdlc/ACTIVE_TICKET` when `guardrails.requireTicket` is on |
-| `gate-production` | PreToolUse | Denies production commands without a fresh `.sdlc/release/AUTHORIZED-<sha>` |
-| `post-edit-verify` | PostToolUse | Runs the configured formatter and linter on the edited file |
+| `guard-secrets` | PreToolUse | Denies access to secret files (project defaults or `guardrails.secretPaths`) and the home credential directories |
+| `guard-protected-paths` | PreToolUse | Denies edits to `guardrails.protectedPaths` (nothing by default) and always to the release-authorisation markers |
+| `guard-verifier-readonly` | PreToolUse | Denies file edits from the verifier and auditor agents (their shell is unrestricted) |
+| `gate-production` | PreToolUse | Denies commands listed in `environments.prod.deployCommandPatterns` without a fresh `.sdlc/release/AUTHORIZED-<sha>`; no built-in patterns |
 
-Every hook exits 0 silently in a repository without `sdlc.config.json`.
+Every hook exits 0 silently in a repository without `sdlc.config.json`. Nothing gates source, test, lockfile, CI or config edits, installs, scripts or staging deploys; formatting and linting run after a change, not per edit.
 
 ### Also shipped
 

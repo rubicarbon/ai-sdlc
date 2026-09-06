@@ -18,15 +18,13 @@ for stage in tickets build verify ship; do
   msg=$(bash "$SDLC_PLUGIN_ROOT/scripts/loop/precondition.sh" "$stage" 2>/dev/null); rc=$?
   pre=$(jq -c --arg s "$stage" --argjson ok "$([ $rc -eq 0 ] && echo true || echo false)" --arg m "$msg" '.[$s]={ready:$ok,reason:(if $m=="" then null else $m end)}' <<<"$pre")
 done
-active=$( [ -s "$art/ACTIVE_TICKET" ] && head -n1 "$art/ACTIVE_TICKET" || true)
-fix=$( [ -e "$art/FIX_MODE" ] && echo true || echo false)
 auth=$(ls "$art"/release/AUTHORIZED-* 2>/dev/null | sed 's|.*/AUTHORIZED-||' | jq -R . | jq -cs .)
 features=$(for feature in "$art"/features/*/; do [ -d "$feature" ] && basename "${feature%/}"; done | jq -R . | jq -cs .)
 verify_reports=$(ls "$art"/verify/*.md 2>/dev/null | wc -l | tr -d ' ')
 jq -cn --arg dir "$SDLC_PROJECT_DIR" --argjson valid "$valid" --arg errors "$errors" \
   --arg platform "$(sdlc_config .platform none)" --argjson tier "$(sdlc_config .tier 0)" --arg team "$(sdlc_config .team.mode solo)" --arg verify "$(sdlc_config .commands.verify '')" \
   --arg pv "$(sdlc_config .pluginVersion unknown)" --arg cur "$SDLC_PLUGIN_VERSION" \
-  --argjson drift "$drift" --argjson mp "$mp" --argjson pre "$pre" --arg active "$active" --argjson fix "$fix" --argjson auth "$auth" --argjson features "$features" --argjson vr "$verify_reports" '
+  --argjson drift "$drift" --argjson mp "$mp" --argjson pre "$pre" --argjson auth "$auth" --argjson features "$features" --argjson vr "$verify_reports" '
   {initialised:true, dir:$dir, config:{valid:$valid, errors:(if $errors=="" then [] else ($errors|split("\n")) end), platform:$platform, tier:$tier, team:$team, verify:$verify, renderedBy:$pv, pluginVersion:$cur, upgradeAvailable:($pv != $cur)},
    drift:{result:$drift.result, pending:$drift.pending}, mattpocock:$mp, stages:$pre,
-   activeTicket:(if $active=="" then null else $active end), fixMode:$fix, releaseAuthorisations:$auth, features:$features, verifyReports:$vr}'
+   releaseAuthorisations:$auth, features:$features, verifyReports:$vr}'

@@ -5,7 +5,7 @@ description: "Release gates, release note and rollback rehearsal for shipping a 
 
 # Ship a change
 
-Nothing reaches production on the agent's say-so. The gates are deterministic (`scripts/ship/preflight.sh`), the authorisation is human (`scripts/ship/authorize.sh`), and the production gate hook enforces both on every deploy-shaped command. `/ai-sdlc:sdlc-ship <pr-id>` drives the procedure.
+Nothing reaches production on the agent's say-so. The gates are deterministic (`scripts/ship/preflight.sh`), the authorisation is human (`scripts/ship/authorize.sh`), and the production gate hook enforces both on every command listed in `environments.prod.deployCommandPatterns` (the configured production command is always on that list; nothing is gated that the project did not list). `/ai-sdlc:sdlc-ship <pr-id>` drives the procedure.
 
 ## Gates, in order
 
@@ -26,7 +26,7 @@ The report rules live in one place, `scripts/loop/_reports.sh`, and the marker r
 
 ## Why authorisation is human-only
 
-`authorize.sh` exits 2 when `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` or `CLAUDE_PROJECT_DIR` is set, so it cannot run from a Bash tool call. `.sdlc/release/**` is a protected path, so the agent cannot write the marker by hand either. The marker (`authorised_by`, `authorised_at`, `expires`, `expires_at`, `commit`) is bound to one full sha and expires (default 120 minutes, `--ttl-minutes`), so a new commit or a stale session closes the gate again. `gate-production.sh` validates the marker for `HEAD` with the rules in the table above before any command matching `environments.prod.deployCommandPatterns` and denies with the validator's reason otherwise; a marker it cannot parse is a denial, not a pass. Ask the human to run, in their own terminal:
+`authorize.sh` exits 2 when `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` or `CLAUDE_PROJECT_DIR` is set, so it cannot run from a Bash tool call. `.sdlc/release/**` is one of the two paths `guard-protected-paths` always protects (no unlock marker releases it), so the agent cannot write the marker by hand either. The marker (`authorised_by`, `authorised_at`, `expires`, `expires_at`, `commit`) is bound to one full sha and expires (default 120 minutes, `--ttl-minutes`), so a new commit or a stale session closes the gate again. `gate-production.sh` validates the marker for `HEAD` with the rules in the table above before any command matching `environments.prod.deployCommandPatterns` and denies with the validator's reason otherwise; a marker it cannot parse is a denial, not a pass. Ask the human to run, in their own terminal:
 
 ```
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/ship/authorize.sh" --sha <HEAD sha> --ttl-minutes 120 --by <name>
