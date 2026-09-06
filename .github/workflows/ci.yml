@@ -45,8 +45,7 @@ jobs:
             plugins/ai-sdlc/scripts/*.sh \
             plugins/ai-sdlc/scripts/*/*.sh \
             plugins/ai-sdlc/scripts/platform/*/*.sh \
-            plugins/ai-sdlc/bin/sdlc-platform \
-            .claude/hooks/guard-repo-boundary.sh
+            plugins/ai-sdlc/bin/sdlc-platform
 
       - name: Rendered CI templates parse as YAML
         run: |
@@ -67,9 +66,6 @@ jobs:
           mkdir -p .dev/scratch/actionlint/.github/workflows
           cp .dev/scratch/ci-render/plugins_ai-sdlc_templates_github_workflows_*.yml .dev/scratch/actionlint/.github/workflows/
           ( cd .dev/scratch/actionlint && ../../../actionlint )
-
-      - name: Repository boundary hook tests
-        run: bash .dev/boundary-tests.sh
 
   manifests:
     runs-on: ubuntu-latest

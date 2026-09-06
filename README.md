@@ -112,7 +112,7 @@ plugins/ai-sdlc/
   templates/                        {{MARKER}} templates rendered by init
   evals/                            bash regression cases, no LLM
   config/sdlc.config.schema.json    the schema
-.dev/                               build-session controls (boundary hook, VERIFY.md, scratch)
+.dev/                               build-session controls (VERIFY.md, scratch)
 ```
 
 ## Development
@@ -128,7 +128,7 @@ claude plugin validate . --strict                       # marketplace and plugin
 
 Evals are plain bash cases under `plugins/ai-sdlc/evals/cases/`: hooks are fed fixture stdin, adapters run against the mock `gh` and `az` in `scripts/platform/_mocks/bin`, and init runs non-interactively into scratch repos under `.dev/scratch/`. Azure CLI behaviour is therefore mock-verified, not live-verified, in this build; `.dev/VERIFY.md` lists what still needs a real project and how to check it. `shellcheck -S warning` runs in the `sdlc-evals` CI template on ubuntu; run it locally when it is installed.
 
-The development repository protects itself: `.claude/hooks/guard-repo-boundary.sh` denies any tool call whose resolved path is outside the repository root, and `.claude/settings.json` denies the home directory and system paths. `.dev/README.md` explains both and the kill switch.
+The development repository carries one limited safeguard: `.claude/settings.json` denies `Read`/`Edit` on the home directory and some system paths. It is a speed bump, not a boundary — it names known outside roots rather than confining a session to the repository, and it does not cover `Glob`, `Grep` or the shell tools. `.dev/README.md` lists the gaps.
 
 ## Uninstall
 

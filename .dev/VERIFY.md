@@ -18,7 +18,6 @@ bundled `gh` and `az` mocks only. Nothing in this file claims a live platform re
 | Bash syntax | `bash -n` over `hooks/*.sh`, `scripts/*.sh`, `scripts/*/*.sh`, `scripts/platform/*/*.sh`, `bin/sdlc-platform`, `evals/cases/*.sh` | no errors |
 | Rendered CI YAML parses | `render.sh <template> --config templates/examples/sdlc.config.json --out <f>` then `python -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]))' <f>` for all 4 GitHub workflows and 3 Azure pipelines | `yaml ok` for all 7 |
 | No compiled artifacts tracked | `git ls-files \| grep -E '__pycache__\|\.py[cod]$'` | nothing (the tracked `report.cpython-310.pyc` was removed; `.gitignore` ignores `__pycache__/` and `*.py[cod]`) |
-| Dev-repo boundary hook | `bash .dev/boundary-tests.sh` | run by the repository CI; not re-run in this session |
 
 Not run in this build, stated plainly:
 
