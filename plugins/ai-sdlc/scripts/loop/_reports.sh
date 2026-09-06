@@ -136,6 +136,7 @@ sdlc_validate_verify_report() {
          "$what has $SDLC__R_TREES Tree lines; exactly one is required"
        return 1 ;;
   esac
+  export SDLC_REPORT_TREE   # side channel for sourcing callers, as SDLC_REPORT_BLOCKING is
   SDLC_REPORT_CODE=ok
   return 0
 }

@@ -48,7 +48,7 @@ hook_rel() {
 # config falls back to the defaults (the guards stay on).
 hook_list() {
   local q="$1"; shift
-  jq -r "if ($q | type) == \"array\" then $q[] else \$ARGS.positional[] end" "$SDLC_CONFIG" --args "$@" 2>/dev/null \
+  jq -r "if ($q | type) == \"array\" then ${q}[] else \$ARGS.positional[] end" "$SDLC_CONFIG" --args "$@" 2>/dev/null \
     || { [ $# -eq 0 ] || printf '%s\n' "$@"; }
 }
 
