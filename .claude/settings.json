@@ -1,19 +1,8 @@
 {
   "permissions": {
-    "deny": [
-      "Read(~/**)",
-      "Edit(~/**)",
-      "Read(//c/Users/**)",
-      "Edit(//c/Users/**)",
-      "Read(//tmp/**)",
-      "Edit(//tmp/**)",
-      "Read(//c/Windows/**)",
-      "Edit(//c/Windows/**)",
-      "Read(//c/Program Files/**)",
-      "Read(//c/Program Files (x86)/**)",
-      "Read(//c/ProgramData/**)",
-      "Read(//d/**)",
-      "Edit(//d/**)"
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(git reset:*)"
     ]
   }
 }
