@@ -37,13 +37,26 @@ assert_eq "0" "$(bash "$P/scripts/config/validate.sh" "$gh/sdlc.config.json" --q
 assert_eq "npm run verify" "$(jq -r .commands.verify "$gh/sdlc.config.json")" "verify command detected from package.json (verify script preferred)"
 assert_eq "typescript" "$(jq -r .stack.language "$gh/sdlc.config.json")" "language detected"
 assert_eq "mock-org" "$(jq -r .repo.owner "$gh/sdlc.config.json")" "owner from remote"
-assert_eq "false" "$(jq -r .guardrails.requireTicket "$gh/sdlc.config.json")" "tier 1 does not require tickets"
+assert_eq "null" "$(jq -c '.guardrails' "$gh/sdlc.config.json")" "init writes no guardrails block (no ticket enforcement at any tier)"
+assert_eq '["git push * main"]' "$(jq -c '.environments.prod.deployCommandPatterns' "$gh/sdlc.config.json")" "production gate starts with a push to the default branch only"
 assert_match 'GitHub \(via `sdlc-platform`\)' "$(head -n1 "$gh/docs/agents/issue-tracker.md")" "github tracker doc"
 assert_eq "0" "$(grep -c '{{' "$gh/CLAUDE.md" "$gh/REVIEW.md" "$gh/docs/agents/issue-tracker.md" | awk -F: '{s+=$2} END{print s}')" "no unresolved markers in rendered files"
 [ "$(wc -l <"$gh/CLAUDE.md")" -le 40 ] && _ok "CLAUDE.md under one page" || _fail "CLAUDE.md too long" ""
 jq -e '.permissions.deny | (index("Read(.env)") != null) and (index("Read(~/.config/gh/**)") != null)' "$gh/.claude/settings.json" >/dev/null && _ok "settings carry secret deny rules incl. gh config" || _fail "settings deny rules" "$(cat "$gh/.claude/settings.json")"
+assert_eq "$(jq -c '.permissions.deny + ["Read(~/.config/gh/**)"]' "$P/templates/settings.json.tmpl")" "$(jq -c .permissions.deny "$gh/.claude/settings.json")" "fresh settings deny list is the base template plus the platform rule, in order"
+jq -e '.permissions.deny | (index("Edit(sdlc.config.json)") == null) and (index("Edit(.env.*)") == null) and (index("Read(**/*.pem)") == null) and (index("Edit(.env.local)") != null)' "$gh/.claude/settings.json" >/dev/null && _ok "no deny rule for sdlc.config.json, no wildcard .env edit rule, no blanket .pem rule" || _fail "obsolete deny rules rendered" "$(cat "$gh/.claude/settings.json")"
+# the two layers agree: every default of guard-secrets.sh has a Read deny rule with the same text
+# (.env.* is spelled out as explicit names so that .env.example stays readable in both layers)
+hook_defaults=$(sed -n 's/^defaults=(\(.*\))$/\1/p' "$P/hooks/guard-secrets.sh" | tr -d '"')
+for g in $hook_defaults; do
+  case "$g" in .env.*) continue ;; esac
+  jq -e --arg r "Read($g)" '.permissions.deny | index($r) != null' "$gh/.claude/settings.json" >/dev/null && _ok "deny rule matches hook default $g" || _fail "hook default without a deny rule" "$g"
+done
+jq -e '.permissions.deny | index("Read(.env.example)") == null and index("Edit(.env.example)") == null' "$gh/.claude/settings.json" >/dev/null && _ok "example env files are not denied by the permission layer either" || _fail ".env.example denied" ""
+assert_eq "$(jq -c '.permissions.deny | unique' "$gh/.claude/settings.json")" "$(jq -c '.[".claude/settings.json"].rules' "$gh/.sdlc/managed-files.json")" "manifest records the rules the plugin installed"
 jq -e '.enabledPlugins == null' "$gh/.claude/settings.json" >/dev/null && _ok "solo mode: no enabledPlugins" || _fail "solo enabledPlugins" ""
-grep -qxF '.sdlc/FIX_MODE' "$gh/.gitignore" && _ok ".gitignore has the marker lines" || _fail ".gitignore" ""
+grep -qxF '.sdlc/UNLOCK_PROTECTED' "$gh/.gitignore" && grep -qxF '.sdlc/release/' "$gh/.gitignore" && _ok ".gitignore has the marker lines" || _fail ".gitignore" "$(cat "$gh/.gitignore")"
+grep -qxF '.sdlc/FIX_MODE' "$gh/.gitignore" && _fail ".gitignore must not mention FIX_MODE" "" || _ok ".gitignore has no FIX_MODE or ACTIVE_TICKET lines"
 assert_match 'sdlc-metrics-baseline' "$(jq -r '.next_steps | last' <<<"$out")" "next steps end with the metrics baseline"
 
 echo "-- github re-run is idempotent"
@@ -118,12 +131,12 @@ out=$(bash "$RUN" --repo-dir "$az" --tier 3 --yes --deploy-staging './deploy sta
 assert_eq "0" "$rc" "re-tier azure to 3 exits 0 ($(head -c 300 "$az.err3"))"
 for f in .azuredevops/pipelines/sdlc-pr-review.yml .azuredevops/pipelines/sdlc-evals.yml .azuredevops/pipelines/sdlc-deploy.yml .azuredevops/pull_request_template.md .azuredevops/branch-policies.json; do assert_file "$az/$f" "azure tier 3: $f"; done
 assert_match './deploy production' "$(cat "$az/.azuredevops/pipelines/sdlc-deploy.yml")" "azure deploy pipeline runs the configured production command"
-assert_eq "true" "$(jq '.environments.prod.deployCommandPatterns | index("./deploy production") != null and index("./deploy production*") != null' "$az/sdlc.config.json")" "config patterns cover the production command"
+assert_eq '["git push * main","./deploy production","./deploy production*"]' "$(jq -c '.environments.prod.deployCommandPatterns' "$az/sdlc.config.json")" "config patterns are the default-branch push plus the production command and its wildcard"
 assert_no_file "$az/.github" "azure: no .github directory"
 ghrefs=$(grep -rIwn 'gh' "$az" --exclude-dir=.git --exclude-dir=node_modules | grep -v 'github.com' || true)
 assert_eq "" "$ghrefs" "azure footprint has zero references to gh"
 assert_eq "0" "$(grep -rl '{{[A-Z_]*}}' "$az" --exclude-dir=.git | wc -l | tr -d ' ')" "azure: no unresolved markers anywhere"
-assert_eq "true" "$(jq -r .guardrails.requireTicket "$az/sdlc.config.json")" "tier 3 requires tickets"
+assert_eq "null" "$(jq -c '.guardrails' "$az/sdlc.config.json")" "re-tier to 3 adds no guardrails block (tiers never enable ticket enforcement)"
 
 echo "-- github tier 3 CI footprint"
 gh3="$EVAL_TMP/gh3"; new_repo "$gh3" https://github.com/mock-org/mock-repo.git
@@ -141,7 +154,7 @@ assert_match 'make deploy ENV=production' "$deploy_yml" "rendered deploy workflo
 assert_not_match 'scripts/deploy\.sh' "$deploy_yml" "rendered deploy workflow has no scripts/deploy.sh"
 assert_eq "make deploy ENV=staging" "$(jq -r .commands.deployStaging "$gh3/sdlc.config.json")" "config stores commands.deployStaging"
 assert_eq "make deploy ENV=production" "$(jq -r .commands.deployProduction "$gh3/sdlc.config.json")" "config stores commands.deployProduction"
-assert_eq "true" "$(jq '.environments.prod.deployCommandPatterns | index("make deploy ENV=production") != null and index("make deploy ENV=production*") != null' "$gh3/sdlc.config.json")" "config patterns contain the production command and its wildcard"
+assert_eq '["git push * main","make deploy ENV=production","make deploy ENV=production*"]' "$(jq -c '.environments.prod.deployCommandPatterns' "$gh3/sdlc.config.json")" "config patterns are the default-branch push plus the production command and its wildcard"
 assert_eq "1" "$(jq '[.environments.prod.deployCommandPatterns[] | select(. == "make deploy ENV=production")] | length' "$gh3/sdlc.config.json")" "pattern added once"
 out=$(bash "$RUN" --repo-dir "$gh3" --yes 2>/dev/null)
 assert_eq "already-initialised" "$(jq -r .result <<<"$out")" "tier 3 re-run is idempotent"
@@ -164,6 +177,28 @@ assert_eq "0" "$rc" "re-run with the deploy flags exits 0 ($(head -c 200 "$nd.er
 assert_file "$nd/.github/workflows/sdlc-deploy.yml" "re-run with the deploy flags renders the deploy workflow"
 assert_match 'npm run deploy:prod' "$(cat "$nd/.github/workflows/sdlc-deploy.yml")" "rendered deploy workflow has the later-added command"
 assert_eq "true" "$(jq '.environments.prod.deployCommandPatterns | index("npm run deploy:prod") != null' "$nd/sdlc.config.json")" "later-added production command is gated"
+
+echo "-- environment names are canonicalised"
+envs="$EVAL_TMP/envs"; new_repo "$envs" https://github.com/mock-org/mock-repo.git
+out=$(bash "$RUN" --repo-dir "$envs" --platform github --tier 1 --yes --envs development,stage,production 2>&1 >/dev/null); rc=$?
+assert_eq "0" "$rc" "--envs with long names exits 0 (${out:0:200})"
+assert_eq '["dev","prod","staging"]' "$(jq -c '.environments | keys' "$envs/sdlc.config.json")" "environments stored under the canonical keys the hook reads"
+assert_eq '["git push * main"]' "$(jq -c '.environments.prod.deployCommandPatterns' "$envs/sdlc.config.json")" "production patterns live under prod, not production"
+bad_envs="$EVAL_TMP/badenvs"; new_repo "$bad_envs" https://github.com/mock-org/mock-repo.git
+out=$(bash "$RUN" --repo-dir "$bad_envs" --platform github --tier 1 --yes --envs dev,qa 2>&1); rc=$?
+assert_eq "2" "$rc" "an unknown environment name is a usage error"
+assert_match 'dev, staging and prod' "$out" "the error names the accepted environments"
+assert_no_file "$bad_envs/sdlc.config.json" "the refused init wrote no config"
+
+echo "-- first-time adoption never prunes existing deny rules, whatever the flags"
+for flag in --upgrade --force; do
+  ad="$EVAL_TMP/adopt${flag//-/}"; new_repo "$ad" https://github.com/mock-org/mock-repo.git
+  mkdir -p "$ad/.claude"; printf '{"permissions":{"deny":["Edit(sdlc.config.json)","Bash(rm -rf *)"]}}\n' >"$ad/.claude/settings.json"
+  out=$(bash "$RUN" --repo-dir "$ad" --platform github --tier 1 --yes "$flag" 2>/dev/null); rc=$?
+  assert_eq "0" "$rc" "first init with $flag exits 0"
+  assert_eq "installed" "$(jq -r '.files[] | select(.path=="sdlc.config.json") | .status' <<<"$out")" "first init with $flag is an init"
+  jq -e '.permissions.deny | index("Edit(sdlc.config.json)") != null and index("Bash(rm -rf *)") != null and index("Read(.env)") != null' "$ad/.claude/settings.json" >/dev/null && _ok "first init with $flag keeps every pre-existing rule and adds the plugin's" || _fail "first init with $flag pruned a pre-existing rule" "$(cat "$ad/.claude/settings.json")"
+done
 
 echo "-- errors"
 mkdir -p "$EVAL_TMP/nogit"; out=$(bash "$RUN" --repo-dir "$EVAL_TMP/nogit" 2>&1); rc=$?; assert_eq "1" "$rc" "not a git repo exits 1"

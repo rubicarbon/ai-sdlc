@@ -10,14 +10,18 @@
 #   SDLC_REPORT_REASON   the reason line (empty when valid)
 #   SDLC_REPORT_WARNING  a non-fatal note (security report without a Commit line), also on stderr
 #   SDLC_REPORT_CODE     ok | no-file | empty | wrong-kind | no-verdict | many-verdicts |
-#                        verdict-fail | no-commit | many-commits | commit-mismatch |
-#                        no-blocking | many-blocking | malformed-blocking
+#                        verdict-fail | no-commit | many-commits | commit-mismatch | no-tree |
+#                        many-trees | no-blocking | many-blocking | malformed-blocking
 #   SDLC_REPORT_COMMIT   the sha captured from the Commit line (may be empty)
+#   SDLC_REPORT_TREE     clean | isolated, from the Tree line of a verification report
 #   SDLC_REPORT_BLOCKING the Blocking count of a valid security report
 #
 # Rules (fail closed: anything the parser cannot read is a red gate, never zero findings):
 #   verification  non-empty, not *-security.md, exactly one Verdict line, verdict PASS, exactly
-#                 one Commit line whose sha is a prefix of HEAD
+#                 one Commit line whose sha is a prefix of HEAD, exactly one "Tree: clean" or
+#                 "Tree: isolated" line (the verified tree was HEAD: a clean checkout, or the
+#                 disposable worktree of scripts/verify/run-isolated.sh; a run on a dirty
+#                 checkout is not release evidence for HEAD)
 #   security      non-empty, exactly one well-formed "Blocking: <n>" line; when a Commit line is
 #                 present it must match HEAD (absence is allowed; a warning goes to stderr)
 
@@ -38,15 +42,18 @@ sdlc_latest_security_report() { sdlc_security_reports "$1" | head -n1; }
 
 # sdlc__report_scan <file> : counts and captures over the report lines, matched lowercase.
 # Sets SDLC__R_VERDICTS, SDLC__R_VERDICT (pass|fail), SDLC__R_COMMITS, SDLC_REPORT_COMMIT,
-# SDLC__R_BLOCK_LINES (lines that start with "Blocking:"), SDLC__R_BLOCK_OK (well-formed ones),
-# SDLC__R_BLOCKING (the count of the last well-formed line), SDLC__R_BLOCK_TEXT (last raw line).
+# SDLC__R_TREES, SDLC_REPORT_TREE (clean|isolated), SDLC__R_BLOCK_LINES (lines that start with
+# "Blocking:"), SDLC__R_BLOCK_OK (well-formed ones), SDLC__R_BLOCKING (the count of the last
+# well-formed line), SDLC__R_BLOCK_TEXT (last raw line).
 sdlc__report_scan() {
   local line l
   local re_verdict='^[[:space:]]*\**verdict(:\**|\**:)[[:space:]]*\**(pass|fail)\**([^a-z0-9]|$)'
   local re_commit='^[[:space:]]*\**commit(:\**|\**:)[[:space:]]*`?([0-9a-f]{7,40})`?([^0-9a-z]|$)'
+  local re_tree='^[[:space:]]*\**tree(:\**|\**:)[[:space:]]*\**(clean|isolated)\**([^a-z0-9]|$)'
   local re_block_any='^[[:space:]]*\**blocking\**:'
   local re_block='^[[:space:]]*\**blocking:\**[[:space:]]*([0-9]+)([^0-9]|$)'
   SDLC__R_VERDICTS=0; SDLC__R_VERDICT=""; SDLC__R_COMMITS=0; SDLC_REPORT_COMMIT=""
+  SDLC__R_TREES=0; SDLC_REPORT_TREE=""
   SDLC__R_BLOCK_LINES=0; SDLC__R_BLOCK_OK=0; SDLC__R_BLOCKING=""; SDLC__R_BLOCK_TEXT=""
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"; l="${line,,}"
@@ -55,6 +62,9 @@ sdlc__report_scan() {
     fi
     if [[ "$l" =~ $re_commit ]]; then
       SDLC__R_COMMITS=$((SDLC__R_COMMITS + 1)); SDLC_REPORT_COMMIT="${BASH_REMATCH[2]}"
+    fi
+    if [[ "$l" =~ $re_tree ]]; then
+      SDLC__R_TREES=$((SDLC__R_TREES + 1)); SDLC_REPORT_TREE="${BASH_REMATCH[2]}"
     fi
     if [[ "$l" =~ $re_block_any ]]; then
       SDLC__R_BLOCK_LINES=$((SDLC__R_BLOCK_LINES + 1)); SDLC__R_BLOCK_TEXT="$line"
@@ -72,7 +82,7 @@ sdlc__report_fail() {  # sdlc__report_fail <code> <reason> : record, print, retu
 sdlc__report_basic() {  # shared file checks; prints nothing on success
   local f="$1" name="${1##*/}"
   SDLC_REPORT_CODE=ok; SDLC_REPORT_REASON=""; SDLC_REPORT_WARNING=""
-  SDLC_REPORT_COMMIT=""; SDLC_REPORT_BLOCKING=""
+  SDLC_REPORT_COMMIT=""; SDLC_REPORT_TREE=""; SDLC_REPORT_BLOCKING=""
   [ -f "$f" ] || { sdlc__report_fail no-file "report $name does not exist"; return 1; }
   [ -s "$f" ] || { sdlc__report_fail empty "report $name is empty"; return 1; }
   return 0
@@ -117,6 +127,16 @@ sdlc_validate_verify_report() {
     sdlc__report_fail commit-mismatch \
       "$what is for commit ${SDLC_REPORT_COMMIT:0:12}, not HEAD ${head:0:12}: re-verify"
     return 1; }
+  case "$SDLC__R_TREES" in
+    0) sdlc__report_fail no-tree \
+         "$what has no 'Tree: clean|isolated' line, so the verified tree is unknown: a PASS is release evidence only for a clean checkout or the isolated worktree; re-verify"
+       return 1 ;;
+    1) ;;
+    *) sdlc__report_fail many-trees \
+         "$what has $SDLC__R_TREES Tree lines; exactly one is required"
+       return 1 ;;
+  esac
+  export SDLC_REPORT_TREE   # side channel for sourcing callers, as SDLC_REPORT_BLOCKING is
   SDLC_REPORT_CODE=ok
   return 0
 }

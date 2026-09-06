@@ -19,4 +19,4 @@ Say so explicitly ("contradicts ADR-0003 because …") and let the human decide;
 
 ## Verification vocabulary for {{PROJECT_NAME}}
 
-`{{COMMANDS_VERIFY}}` is **the verify command**. A ticket is **accepted** when its `Status:` is `ready-for-agent`; it is **active** when its id is in `{{ARTIFACTS_DIR}}/ACTIVE_TICKET`; a release is **authorised** when `{{ARTIFACTS_DIR}}/release/AUTHORIZED-<sha>` exists for the commit being shipped.
+`{{COMMANDS_VERIFY}}` is **the verify command**. A ticket is **accepted** when its `Status:` is `ready-for-agent`; it is **active** when the branch being built names its id in its commits and pull request; a release is **authorised** when `{{ARTIFACTS_DIR}}/release/AUTHORIZED-<sha>` exists for the commit being shipped.

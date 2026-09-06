@@ -10,24 +10,19 @@
       {
         "matcher": "Edit|Write|NotebookEdit|Bash|PowerShell",
         "hooks": [
-          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard-protected-paths.sh"], "timeout": 10 },
-          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard-verifier-readonly.sh"], "timeout": 10 },
-          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard-test-edits.sh"], "timeout": 10 },
-          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard-ticket-gate.sh"], "timeout": 10 }
+          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard-protected-paths.sh"], "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard-verifier-readonly.sh"], "timeout": 10 }
         ]
       },
       {
         "matcher": "Bash|PowerShell",
         "hooks": [
           { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate-production.sh"], "timeout": 10 }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-verify.sh"], "timeout": 90 }
         ]
       }
     ]

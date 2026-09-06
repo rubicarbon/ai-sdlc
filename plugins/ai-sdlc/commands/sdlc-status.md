@@ -1,5 +1,5 @@
 ---
-description: "Show the SDLC state of this repo: config validity, tier, platform, template drift, mattpocock-skills drift, stage readiness, active ticket, FIX_MODE and release authorisations."
+description: "Show the SDLC state of this repo: config validity, tier, platform, template drift, mattpocock-skills drift, stage readiness, features in flight and release authorisations."
 disable-model-invocation: true
 allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/init/status.sh *), Bash(jq *)
 ---
@@ -21,7 +21,7 @@ Otherwise present, in this order:
 | Drift | `drift.result` (`clean`, `drift`, `unknown`), `drift.pending[]` (`path`, `status` = `template-changed` or `missing`) | list each pending file; any `template-changed` entry also earns the `/ai-sdlc:sdlc-upgrade` pointer |
 | Inner loop | `mattpocock.installed`, `installed_version` vs `expected_version`, `missing`, `retyped`, `editable_copies`, `drift` | not installed: `/plugin install mattpocock-skills`; drift: the `ai-sdlc:sdlc-loop` routing table is stale, see `docs/REUSE.md` |
 | Stages | `stages.tickets|build|verify|ship` with `ready` and `reason` | a table: stage, ready, reason (the reason names the command that unblocks it) |
-| Work in flight | `activeTicket`, `fixMode`, `features[]`, `verifyReports` | active ticket id or none; FIX_MODE armed means test edits are denied by hook |
+| Work in flight | `features[]`, `verifyReports` | the feature directories under the artifacts dir and how many verification reports exist |
 | Releases | `releaseAuthorisations[]` (commit shas) | list them; each is valid only until the expiry inside the marker file |
 
 Close with the first stage whose `ready` is false and its `reason`: that is the next thing to do. Done when every section above has been printed.

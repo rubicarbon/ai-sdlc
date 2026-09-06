@@ -6,8 +6,9 @@
 # Exit 0 when the report is valid (one summary line on stdout), 1 otherwise with the reason on
 # stderr, 2 on usage errors. Without --head the HEAD of the repository containing the file is
 # used; a verification report cannot be validated without a HEAD to bind it to, a security
-# report can (its Commit line is then only checked for shape). Read-only: safe for CI and for
-# the verifier subagent. Works outside an sdlc project too.
+# report can (its Commit line is then only checked for shape). A verification PASS also needs
+# one "Tree: clean" or "Tree: isolated" line saying the verified tree was HEAD. Read-only: safe
+# for CI and for the verifier subagent. Works outside an sdlc project too.
 set -u
 . "${0%/*}/../_root.sh" || exit 2
 . "$SDLC_PLUGIN_ROOT/scripts/_lib.sh"
@@ -42,7 +43,7 @@ else
     sdlc_die 1 "cannot determine HEAD for ${file##*/}: pass --head <sha>"
   fi
   if sdlc_validate_verify_report "$file" "$head" >/dev/null; then
-    echo "valid verification report: ${file##*/} (PASS for commit ${head:0:12})"; exit 0
+    echo "valid verification report: ${file##*/} (PASS for commit ${head:0:12}, tree $SDLC_REPORT_TREE)"; exit 0
   fi
 fi
 echo "ai-sdlc: $SDLC_REPORT_REASON" >&2

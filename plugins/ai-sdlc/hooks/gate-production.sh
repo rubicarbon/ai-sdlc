@@ -1,25 +1,34 @@
 #!/usr/bin/env bash
 # gate-production.sh (PreToolUse: Bash|PowerShell)
-# Production-affecting commands (environments.prod.deployCommandPatterns) run only with an
-# explicit, fresh release authorisation: <artifacts>/release/AUTHORIZED-<HEAD sha> written by
+# Commands matching environments.prod.deployCommandPatterns run only with an explicit, fresh
+# release authorisation: <artifacts>/release/AUTHORIZED-<HEAD sha> written by
 # /ai-sdlc:sdlc-ship after a human said yes. The marker carries an expiry; after it, or on a
-# different commit, the gate closes again. Agents hold no production credentials, and this hook
-# is the last deterministic stop before a deploy command leaves the session.
+# different commit, the gate closes again. The pattern list comes from the project's own
+# sdlc.config.json only (/ai-sdlc:sdlc-init seeds a push to the default branch and the configured
+# production deploy command); there are no built-in patterns, so an absent or empty list gates
+# nothing. Agents hold no production credentials, and this hook is the last deterministic stop
+# before a configured deploy command leaves the session.
 set -u
 . "${0%/*}/../scripts/_root.sh" || exit 2
 . "$SDLC_PLUGIN_ROOT/scripts/_hook.sh"
 
 [ -n "$HOOK_CMD" ] || exit 0
-defaults=("git push * main" "git push * master" "git push * release/*" "git push * production" "git push --tags*" "gh workflow run *deploy*" "gh release create *" "az pipelines run *" "az pipelines release *" "az webapp deploy*" "az functionapp deploy*" "az containerapp up*" "kubectl apply *" "kubectl rollout *" "helm upgrade *" "helm install *" "terraform apply *" "pulumi up *" "aws cloudformation deploy *" "aws lambda update-function-code *" "serverless deploy*" "sls deploy*" "fly deploy*" "vercel --prod*" "netlify deploy --prod*" "cap production deploy*" "docker push *")
-mapfile -t patterns < <(hook_list '.environments.prod.deployCommandPatterns' "${defaults[@]}")
+mapfile -t patterns < <(hook_list '.environments.prod.deployCommandPatterns')
+[ ${#patterns[@]} -gt 0 ] || exit 0
 
 glob_to_re() {  # command glob -> anchored ERE; * matches anything including spaces
-  local g="$1" out="" i c
+  # The command must start and end at a shell separator (;, &, |, newline) or at the ends of the
+  # string, so a pattern cannot match mid-word. A literal newline goes into the bracket
+  # expressions: POSIX ERE has no "\n" escape (bracket expressions take "\" literally, and bash's
+  # [[ =~ ]] rejects the bare escape on msys), so writing it as text silently disabled the whole
+  # gate on Git Bash. "&&" and "||" need no alternation of their own; their second character is in
+  # the bracket already.
+  local g="$1" out="" i c nl=$'\n'
   for (( i=0; i<${#g}; i++ )); do
     c="${g:$i:1}"
     case "$c" in '*') out="$out.*" ;; '.'|'+'|'('|')'|'|'|'^'|'$'|'{'|'}'|'['|']'|'\\'|'?') out="$out\\$c" ;; *) out="$out$c" ;; esac
   done
-  printf '(^|[;&|]|&&|\\|\\||\\n)[[:space:]]*%s[[:space:]]*($|[;&|])' "$out"
+  printf '(^|[;&|%s])[[:space:]]*%s[[:space:]]*($|[;&|%s])' "$nl" "$out" "$nl"
 }
 
 matched=""

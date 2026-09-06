@@ -34,4 +34,8 @@ Bring the managed files up to the installed plugin version without losing anyone
 
 4. `user_edited[]` files are reported and kept. Explain that the template moved on but their edits win, and that `run.sh --force` overwrites them: a human runs that in their own terminal after backing up the file. Never run `--force` yourself.
 
-5. Remove `.sdlc/tmp`, show the `files` list from the last run, and remind the user to commit. Done when every pending file is either upgraded or explicitly left with its diff shown.
+5. `.claude/settings.json` reported `template-changed` means one of two things, both applied by `--upgrade`: new deny rules from the current templates are added, and deny rules an earlier plugin version wrote that the plugin no longer generates are removed (`Edit(sdlc.config.json)`, `Edit(.env.*)`, `Read(**/*.pem)`, `Read(**/id_rsa*)`, `Read(**/id_ed25519*)`). The removal matches the exact text, so a rule the user typed themselves with that text is removed too; every removed rule is printed on stderr (`removed obsolete deny rule ...`), so show that list and offer to re-add any the user still wants. Rules with any other text are never touched.
+
+6. Two things `--upgrade` deliberately does not change in `sdlc.config.json`: `environments.prod.deployCommandPatterns` keeps every pattern an earlier version seeded (`kubectl apply *`, `helm upgrade *`, ... are now explicit project configuration; the hook has no built-in patterns, so trimming the list is a hand edit), and the deprecated `guardrails.requireTicket`, `guardrails.testGlobs`, `guardrails.ticketFreePaths` and `guardrails.verifyExtensions` keys stay accepted but enforce nothing; suggest deleting them.
+
+7. Remove `.sdlc/tmp`, show the `files` list from the last run, and remind the user to commit. Done when every pending file is either upgraded or explicitly left with its diff shown.

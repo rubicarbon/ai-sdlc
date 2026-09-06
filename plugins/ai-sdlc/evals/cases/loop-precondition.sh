@@ -40,7 +40,7 @@ head=$(git -C "$proj" rev-parse HEAD); short="${head:0:7}"
 V="$proj/.sdlc/verify"; mkdir -p "$V"
 report() {  # report <name> <verdict> <commit> [extra lines...]
   local n="$1" v="$2" c="$3"; shift 3
-  printf '# Verification: x\n\n**Verdict:** %s\n**Commit:** %s  **Base:** main  **Command:** `npm test` exit 0\n' "$v" "$c" >"$V/$n"
+  printf '# Verification: x\n\n**Verdict:** %s\n**Commit:** %s  **Base:** main  **Command:** `npm test` exit 0\n**Tree:** clean\n' "$v" "$c" >"$V/$n"
   for l in "$@"; do printf '%s\n' "$l" >>"$V/$n"; done
 }
 security() { printf '# Security review: x against main\n\nBlocking: %s  Important: 0  Nit: 0 (cap 5)\n' "$1" >"$V/$2"; }
@@ -86,6 +86,11 @@ printf '# Verification\n\n**Verdict:** PASS\n' >"$V/2026-09-03-$short.md"
 out=$(cd "$proj" && bash "$pre" ship); rc=$?
 assert_eq "2" "$rc" "PASS without a Commit line is blocked"
 assert_match 'no .Commit' "$out" "reason names the missing commit line"
+
+printf '# Verification\n\n**Verdict:** PASS\n**Commit:** %s\n' "$head" >"$V/2026-09-03-$short.md"
+out=$(cd "$proj" && bash "$pre" ship); rc=$?
+assert_eq "2" "$rc" "PASS without a Tree line is blocked"
+assert_match 'verified tree is unknown' "$out" "reason says the verified tree is unknown"
 
 : >"$V/2026-09-03-$short.md"
 out=$(cd "$proj" && bash "$pre" ship); rc=$?
