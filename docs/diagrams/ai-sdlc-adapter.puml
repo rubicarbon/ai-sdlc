@@ -1,0 +1,78 @@
+@startuml ai-sdlc-adapter
+title ai-sdlc — platform adapter dispatch (scripts/platform/contract.md)
+skinparam defaultTextAlignment left
+skinparam wrapWidth 280
+
+start
+:caller (skill, command, agent, CI template,
+docs/agents/issue-tracker.md) runs
+sdlc-platform [--platform github|azure] [--dry-run] [--mock] <function> [args];
+note right
+  Callers never run gh, az or glab directly.
+  12 functions: platform_detect, work_item_create,
+  work_item_get, work_item_link, work_item_comment,
+  pr_create, pr_get, pr_comment, pr_checks,
+  branch_protect_apply, ci_workflow_install, metrics_export
+end note
+
+:resolve platform in order;
+if (--platform given?) then (yes)
+  :use it;
+elseif ($SDLC_PLATFORM set?) then (yes)
+  :use it;
+elseif (platform in sdlc.config.json\n(both / auto defer)?) then (concrete)
+  :use it;
+else (defer / absent)
+  :scripts/platform/_detect.sh on the "origin" remote;
+endif
+
+if (platform == none?) then (yes)
+  :exit 3 for everything except platform_detect;
+  stop
+else (no)
+endif
+
+if (--mock or SDLC_PLATFORM_MOCK=1?) then (yes)
+  :prepend scripts/platform/_mocks/bin to PATH
+  fake gh/az: counters + created items in $SDLC_MOCK_STATE,
+  every invocation appended to $SDLC_MOCK_LOG;
+else (no)
+endif
+if (--dry-run or SDLC_DRY_RUN=1?) then (yes)
+  :run against mocks with a temporary log,
+  print each CLI command as "+ <cmd>", no JSON result;
+  stop
+else (no)
+endif
+
+:exec scripts/platform/<platform>/<function>.sh
+sources _root.sh then _common.sh (=> _lib.sh, _project.sh)
+helpers: out_json, md_to_html, require_gh, require_az,
+az_context, not_supported;
+
+:print exactly one JSON object on one line
+identical field names and types on both platforms
+unsupplied field = null (never omitted), ids are strings,
+bodies always passed as files, no silent no-ops;
+
+if (outcome) then (0)
+  :success;<<#C8E6C9>>
+elseif (1) then
+  :failed — stderr starts with "ai-sdlc:";<<#FFCDD2>>
+elseif (2) then
+  :usage;<<#FFE0B2>>
+elseif (3) then
+  :not supported on this platform (exact message form);<<#FFE0B2>>
+else (8)
+  :pending — pr_checks only;<<#FFF9C4>>
+endif
+
+:scripts/platform/conformance.sh [--platform github|azure|all]
+scratch repo per platform, every function under mocks,
+jq assertions on exit codes + stdout shapes,
+idempotency of work_item_link and branch_protect_apply,
+exact not-supported message, static check that no Azure script
+mentions gh and no GitHub script mentions az,
+then diffs normalised key sets between platforms — exit 1 on first divergence;
+stop
+@enduml

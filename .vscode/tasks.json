@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PlantUML server: up",
+      "type": "shell",
+      "command": "docker run -d --restart unless-stopped --name plantuml-server -p 8080:8080 plantuml/plantuml-server:jetty || docker start plantuml-server",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent" }
+    },
+    {
+      "label": "PlantUML server: stop",
+      "type": "shell",
+      "command": "docker stop plantuml-server",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent" }
+    }
+  ]
+}
