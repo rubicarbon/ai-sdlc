@@ -15,6 +15,20 @@ sdlc_die() {   # sdlc_die [exit-code] message...
 
 sdlc_log() { [ "${SDLC_QUIET:-0}" = "1" ] || echo "ai-sdlc: $*" >&2; }
 
+# The commands.verify detect.sh proposes when the repository offers no candidate. It exits
+# non-zero on purpose: a verification command that always succeeds is worse than none, because
+# the rendered verify job would report green having verified nothing, and at tier 3 that job is
+# the required status check. run.sh refuses tier 3 while commands.verify is still this string.
+SDLC_VERIFY_PLACEHOLDER='sh -c '"'"'echo "ai-sdlc: set commands.verify in sdlc.config.json" >&2; exit 1'"'"''
+# The placeholder plugin 0.1.0 wrote. It exits 0, so a repository initialised by that version
+# carries a commands.verify that always succeeds; sdlc_verify_is_placeholder recognises both so
+# an upgrade cannot hand the verification job a command that verifies nothing.
+SDLC_VERIFY_PLACEHOLDER_LEGACY="echo 'set commands.verify in sdlc.config.json'"
+
+sdlc_verify_is_placeholder() {  # sdlc_verify_is_placeholder <commands.verify>
+  case "$1" in "$SDLC_VERIFY_PLACEHOLDER"|"$SDLC_VERIFY_PLACEHOLDER_LEGACY"|'') return 0 ;; *) return 1 ;; esac
+}
+
 sdlc_has() { command -v "$1" >/dev/null 2>&1; }
 
 sdlc_require() {  # sdlc_require cmd [hint]

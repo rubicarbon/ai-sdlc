@@ -35,7 +35,7 @@ Not run in this build, stated plainly:
 claude plugin list
 ```
 
-Expected: `ai-sdlc@ai-sdlc-kit` enabled, version `0.1.0`. Quick alternative: `claude --plugin-dir C:\Projects\ai-sdlc\plugins\ai-sdlc`.
+Expected: `ai-sdlc@ai-sdlc-kit` enabled, version `0.1.1`. Quick alternative: `claude --plugin-dir C:\Projects\ai-sdlc\plugins\ai-sdlc`.
 
 ### B2. Components registered
 
