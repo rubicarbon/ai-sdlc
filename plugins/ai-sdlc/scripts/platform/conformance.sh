@@ -102,7 +102,7 @@ run_platform() {
   PR_ID=$(printf '%s' "$OUT" | jq -r .id); SHAPE_PR_CREATE=$(keys_of "$OUT")
 
   expect "$p" 0 "pr_get" -- pr_get "$PR_ID"
-  shape "$p" "pr_get shape" '.id=="'"$PR_ID"'" and (.state|IN("open","merged","closed")) and (.base|type=="string") and (.head|type=="string") and (.review_decision|IN("approved","changes_requested","pending")) and has("additions") and has("deletions") and has("changed_files") and has("merged_at")'
+  shape "$p" "pr_get shape" '.id=="'"$PR_ID"'" and (.state|IN("open","merged","closed")) and (.base|type=="string") and (.head|type=="string") and (.review_decision|IN("approved","changes_requested","pending")) and has("additions") and has("deletions") and has("changed_files") and has("merged_at") and (.body|type=="string") and (.head_sha|type=="string" and test("^[0-9a-f]{7,40}$")) and (.base_sha|type=="string") and (.head_repo|type=="string") and (.head_repo_url|type=="string") and (.is_fork|type=="boolean")'
   SHAPE_PR_GET=$(keys_of "$OUT")
 
   expect "$p" 0 "pr_comment" -- pr_comment "$PR_ID" "$d/comment.md"

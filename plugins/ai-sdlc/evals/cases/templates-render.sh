@@ -29,6 +29,7 @@ assert_eq "# Use X" "$(printf '%s\n' "$out" | head -n1)" "adr template renders w
 # branch templates render with the adapter's variables
 out=$(bash "$render" "$P/templates/github/branch-protection.json" --config "$cfg" --var REVIEW_REQUIRED_APPROVALS=1 2>&1); printf '%s' "$out" | jq -e '.required_status_checks.contexts==["sdlc-pr-review"]' >/dev/null && _ok "branch-protection.json renders checks from config" || _fail "branch-protection.json" "$out"
 out=$(bash "$render" "$P/templates/azure/branch-policies.json" --config "$cfg" --var AZURE_PIPELINE_NAME=sdlc-pr-review 2>&1); printf '%s' "$out" | jq -e '.policies[1].settings.requiredReviewerIds==["lead@contoso.com"]' >/dev/null && _ok "branch-policies.json renders reviewers from config" || _fail "branch-policies.json" "$out"
+out=$(bash "$render" "$P/templates/azure/branch-policies-local.json" --config "$cfg" 2>&1); printf '%s' "$out" | jq -e '(.policies | map(.kind) | index("build")) == null and (.policies | length) == 4 and .policies[1].settings.requiredReviewerIds==["lead@contoso.com"]' >/dev/null && _ok "branch-policies-local.json renders the four policies without a build requirement" || _fail "branch-policies-local.json" "$out"
 
 # deploy templates: the configured commands are authoritative, nothing else is hardcoded
 for t in github/workflows/sdlc-deploy.yml azure/pipelines/sdlc-deploy.yml; do

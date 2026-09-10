@@ -23,5 +23,6 @@ Otherwise present, in this order:
 | Stages | `stages.tickets|build|verify|ship` with `ready` and `reason` | a table: stage, ready, reason (the reason names the command that unblocks it) |
 | Work in flight | `features[]`, `verifyReports` | the feature directories under the artifacts dir and how many verification reports exist |
 | Releases | `releaseAuthorisations[]` (commit shas) | list them; each is valid only until the expiry inside the marker file |
+| Review | `review.runner`, `review.launches[]` (launch id, pr, state, detail), `review.retirePending[]`, `review.migrationPending` | with runner `local`: list every launch that has not reached a terminal state (the author waits for `posted`); name retired review files still present; when the migration is pending say to run `sdlc-platform branch_protect_apply <branch>` |
 
 Close with the first stage whose `ready` is false and its `reason`: that is the next thing to do. Done when every section above has been printed.

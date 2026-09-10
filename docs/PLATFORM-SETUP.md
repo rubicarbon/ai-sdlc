@@ -8,7 +8,8 @@ Run the steps for your platform after the tier that needs them:
 | --- | --- |
 | 0 and 1 | CLI login only (`gh auth login` or `az login` plus `az extension add --name azure-devops`) |
 | 2 | branch protection or branch policies (section 3 or 7) |
-| 3 | the `ANTHROPIC_API_KEY` secret, the `staging` and `production` environments with a human approval on `production`, and the deploy commands in `sdlc.config.json` (sections 2, 4, 5 and 8, 9, 10) |
+| 3, `review.runner: ci` | the `ANTHROPIC_API_KEY` secret, the `staging` and `production` environments with a human approval on `production`, and the deploy commands in `sdlc.config.json` (sections 2, 4, 5 and 8, 9, 10) |
+| 3, `review.runner: local` | no secret: `claude` on `PATH` and a terminal emulator on the developer machine (section 13), the environments and approval rule, the deploy commands (sections 4, 5, 9, 10) |
 
 ## GitHub
 
@@ -21,9 +22,9 @@ gh auth status
 
 For a fine-grained personal access token instead, grant on the repository: Issues read and write, Pull requests read and write, Contents read, Administration read and write (branch protection), Actions read, Deployments read. `docs/SECURITY.md` explains why each scope is needed.
 
-### 2. Repository secret `ANTHROPIC_API_KEY`
+### 2. Repository secret `ANTHROPIC_API_KEY` (`review.runner: ci` only)
 
-The `sdlc-pr-review` workflow reads it. Set it from your own terminal, never from an agent session, and never commit it:
+The `sdlc-pr-review` workflow reads it; with `review.runner: local` there is no such workflow and no secret to create (section 13). Set it from your own terminal, never from an agent session, and never commit it:
 
 ```bash
 gh secret set ANTHROPIC_API_KEY --repo <owner>/<repo>
@@ -71,7 +72,7 @@ az devops configure --defaults organization=https://dev.azure.com/<org> project=
 
 For a personal access token instead, export `AZURE_DEVOPS_EXT_PAT` with scopes Work Items read and write, Code read and write, Build read and execute, Project and Team read.
 
-### 8. Variable group `sdlc-secrets`
+### 8. Variable group `sdlc-secrets` (`review.runner: ci` only)
 
 `sdlc-pr-review.yml` links the variable group `sdlc-secrets` and reads `ANTHROPIC_API_KEY` from it as a secret variable:
 
@@ -94,7 +95,7 @@ sdlc-platform ci_workflow_install
 sdlc-platform branch_protect_apply <default-branch>
 ```
 
-`ci_workflow_install` registers `sdlc-pr-review`, `sdlc-deploy` and `sdlc-evals` with `az pipelines create --skip-first-run`. `branch_protect_apply` creates or updates the approver-count, required-reviewer (from `azure.requiredReviewers`; Azure Repos has no CODEOWNERS), work-item-linking, comment-required and build policies, and reports `applied`, `updated`, `unchanged` and `skipped`; the build policy is skipped until the review pipeline is registered, which is why the order matters.
+`ci_workflow_install` registers `sdlc-pr-review` (runner `ci` only), `sdlc-deploy` and `sdlc-evals` with `az pipelines create --skip-first-run`. `branch_protect_apply` creates or updates the approver-count, required-reviewer (from `azure.requiredReviewers`; Azure Repos has no CODEOWNERS), work-item-linking, comment-required and build policies, and reports `applied`, `updated`, `unchanged` and `skipped`; the build policy is skipped until the review pipeline is registered, which is why the order matters.
 
 ### 10. Environments with an Approvals check
 
@@ -117,3 +118,21 @@ bash <plugin-root>/scripts/ship/authorize.sh --sha HEAD --ttl-minutes 120
 ```
 
 `/ai-sdlc:sdlc-ship` asks for it at the right moment; `docs/SECURITY.md` and `plugins/ai-sdlc/skills/sdlc-ship/SKILL.md` describe what the marker must contain.
+
+## Both platforms: the local review runner (`review.runner: local`), section 13
+
+Nothing to create on the platform. What the developer machine needs:
+
+1. `claude` on `PATH` in the terminal that runs Claude Code (the hook also looks at `CLAUDE_CODE_EXECPATH`, `~/.local/bin/claude`, `~/.claude/local/claude` and `%APPDATA%\npm\claude`; `SDLC_CLAUDE_BIN=<path>` overrides). Check: `command -v claude`.
+2. A terminal emulator the hook can open: Windows Terminal (`wt.exe`) or `cmd start` on Windows, `open -a Terminal` on macOS, `x-terminal-emulator`, `gnome-terminal`, `konsole` or `xterm` on Linux. Anything else: set `review.localLauncher` in `sdlc.config.json` to a command template with `{script}`, `{cwd}` and `{title}` placeholders, for example `"tmux new-window -n {title} bash {script}"`. `SDLC_REVIEW_TERMINAL=wt|cmd|open|osascript|x-terminal-emulator|gnome-terminal|konsole|xterm|none` overrides the detection for one session.
+3. The login: with the default `review.localAuth: login` the launcher removes every `ANTHROPIC_*` variable and the `CLAUDE_CODE_OAUTH_TOKEN` / `CLAUDE_CODE_USE_*` switches, so the review session uses the credentials of `/login` (its status line shows the account; the variable cleanup is not proof of which account is billed). `inherit` keeps them.
+
+What happens: after `sdlc-platform pr_create`, `gh pr create` or `az repos pr create` (only these shapes, only when the new PR id is on stdout; `--dry-run`, other repositories, quoted text and command substitutions never launch), or after a `git push` that leaves the current branch, already mapped to a PR, with its remote-tracking ref equal to HEAD and no review of that commit yet, the hook writes `.sdlc/tmp/review/launch-<id>.json` (state `requested`), opens the window (the launcher writes `started`), and the session runs `/ai-sdlc:sdlc-review --launch <id> --pr <n>`: states `running`, `saved`, then `posted` once the report is validated, posted on the PR and published as `.sdlc/verify/<date>-<sha12>-pr<n>-security.md`. Failures are explicit (`failed head-moved`, `failed validate: …`, `failed post: …`, `failed no-terminal`, `failed no-claude`, `stale`, `skipped duplicate`); a window closed without finishing becomes `abandoned` after `SDLC_REVIEW_STALE_MINUTES` (default 120) through `status.sh sweep`. Read the state with:
+
+```bash
+bash <plugin-root>/scripts/review/status.sh get --pr <n>
+```
+
+The author session is told all of this in the hook's note and must wait for `posted` (or run the command by hand in a new terminal: `claude "/ai-sdlc:sdlc-review --pr <n>"`). The ship gate accepts only that PR-bound report for HEAD under `review.runner: local`. On GitHub keep one CI workflow that reports a check on pull requests: `pr_checks` never passes with zero checks.
+
+Switching an existing tier-3 repository between runners: `run.sh --review-runner local|ci`, then `sdlc-platform branch_protect_apply <default-branch>` (it drops or restores the review check / build policy and marks the migration reconciled in `.sdlc/migrations.json`), and on Azure delete the retired pipeline definition (`az pipelines delete --name sdlc-pr-review`) after the YAML left the default branch. `docs/ADOPTION.md` describes the file retirement rules.

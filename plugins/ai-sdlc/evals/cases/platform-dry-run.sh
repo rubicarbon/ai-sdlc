@@ -52,4 +52,19 @@ for p in github azure; do
   out=$(cd "$r" && SDLC_MOCK_STATE="$EVAL_TMP/state-$p" "$BIN" --platform "$p" ci_workflow_install 2>/dev/null </dev/null)
   assert_eq "1" "$(printf '%s' "$out" | jq -r '.installed|length')" "$p: the real run still installs the file"
 done
+
+echo "-- review.runner local: ci_workflow_install skips the review workflow, whatever the pipeline name"
+for p in github azure; do
+  r="$EVAL_TMP/$p-local"; mkrepo "$r" "$p"
+  jq -c '.review = {runner:"local"} | if .azure then .azure.pipelineName = "custom-ci" else . end | if .github then .github.requiredChecks = [] else . end' "$r/sdlc.config.json" >"$r/c.json" && mv "$r/c.json" "$r/sdlc.config.json"
+  git -C "$r" add -A >/dev/null; git -C "$r" commit -q -m local
+  mkdir -p "$EVAL_TMP/tpl-$p/github/workflows" "$EVAL_TMP/tpl-$p/azure/pipelines"
+  cp "$P/scripts/platform/_mocks/templates/$p/"*/sdlc-mock.yml "$EVAL_TMP/tpl-$p/$p/$( [ "$p" = github ] && echo workflows || echo pipelines )/"
+  cp "$P/templates/$p/$( [ "$p" = github ] && echo workflows || echo pipelines )/sdlc-pr-review.yml" "$EVAL_TMP/tpl-$p/$p/$( [ "$p" = github ] && echo workflows || echo pipelines )/"
+  out=$(cd "$r" && SDLC_CI_TEMPLATES_DIR="$EVAL_TMP/tpl-$p" SDLC_MOCK_STATE="$EVAL_TMP/state-$p" "$BIN" --platform "$p" --dry-run ci_workflow_install 2>"$EVAL_TMP/err" </dev/null); rc=$?
+  assert_eq "0" "$rc" "$p local: dry-run ci_workflow_install exits 0 ($(head -c 200 "$EVAL_TMP/err"))"
+  assert_not_match 'sdlc-pr-review' "$out$(cat "$EVAL_TMP/err")" "$p local: the review workflow is neither installed nor registered"
+  assert_match 'sdlc-mock' "$(cat "$EVAL_TMP/err")" "$p local: the other CI file is still installed"
+done
+
 eval_done

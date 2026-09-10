@@ -33,12 +33,19 @@ place() {  # place <template> <dest-relative>
   { echo "ai-sdlc: $rel differs from the current template (re-run with --force to overwrite):"; diff -u "$dest" "$tmp" | head -n 40; } >&2
   pending+=("$rel"); rm -f "$tmp"
 }
-for t in "$tdir"/pipelines/*.yml; do [ -f "$t" ] && place "$t" ".azuredevops/pipelines/${t##*/}"; done
+runner=$(review_runner)
+for t in "$tdir"/pipelines/*.yml; do
+  [ -f "$t" ] || continue
+  # review.runner local: the review pipeline is neither installed nor registered
+  [ "$runner" = local ] && review_is_workflow "${t##*/}" && continue
+  place "$t" ".azuredevops/pipelines/${t##*/}"
+done
 [ -f "$tdir/pull_request_template.md" ] && place "$tdir/pull_request_template.md" ".azuredevops/pull_request_template.md"
 
 # Registration: a lookup failure is an error, never "not found" (that would register twice).
 for t in "$tdir"/pipelines/*.yml; do
   [ -f "$t" ] || continue
+  [ "$runner" = local ] && review_is_workflow "${t##*/}" && continue
   name="${t##*/}"; name="${name%.yml}"
   found=$(cli_json "az pipelines list --name $name" az pipelines list --name "$name" --repository "$AZ_REPO" \
     --repository-type tfsgit "${AZ_ARGS[@]}" -o json) || exit $?

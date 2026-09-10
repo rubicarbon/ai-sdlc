@@ -35,20 +35,22 @@ else
   gate "verification report PASS" false "$report"
 fi
 
-# 2. security report: newest *-security.md parses and has Blocking 0. The validator is called
-#    without a subshell so its side channel (count, reason, warning) survives.
-sec=$(sdlc_latest_security_report "$art/verify")
-if [ -n "$sec" ]; then
-  if sdlc_validate_security_report "$sec" "$head_sha" >/dev/null 2>&1; then
-    blocking="$SDLC_REPORT_BLOCKING"
-    gate "security review without Blocking findings" "$(bool [ "$blocking" -eq 0 ])" \
-      "$sec (Blocking: $blocking)${SDLC_REPORT_WARNING:+; $SDLC_REPORT_WARNING}"
-  else
-    gate "security review without Blocking findings" false "$SDLC_REPORT_REASON"
-  fi
+# 2. security report: the report sdlc_select_security_report picks for this runner, platform
+#    and PR (review.runner ci: newest *-security.md; local: only the PR-bound report, Commit
+#    required, no fallback) parses and has Blocking 0. Called without a subshell so the side
+#    channel (count, reason, warning) survives.
+runner=$(sdlc_config .review.runner ci); platform=$(sdlc_config .platform none)
+self=$(sdlc_tmpfile)
+if sdlc_select_security_report "$art/verify" "$head_sha" --runner "$runner" --platform "$platform" ${pr:+--pr "$pr"} >"$self" 2>/dev/null; then
+  sec=$(<"$self"); blocking="$SDLC_REPORT_BLOCKING"
+  gate "security review without Blocking findings" "$(bool [ "$blocking" -eq 0 ])" \
+    "$sec (Blocking: $blocking)${SDLC_REPORT_WARNING:+; $SDLC_REPORT_WARNING}"
+elif [ "$SDLC_REPORT_CODE" = no-file ] || [ "$SDLC_REPORT_CODE" = no-pr ]; then
+  gate "security review present" false "$SDLC_REPORT_REASON"
 else
-  gate "security review present" false "no $art/verify/*-security.md: run /ai-sdlc:sdlc-verify --security"
+  gate "security review without Blocking findings" false "$SDLC_REPORT_REASON"
 fi
+rm -f "$self"
 
 # 3. working tree
 gate "working tree clean" "$(bool [ -z "$(git -C "$SDLC_PROJECT_DIR" status --porcelain 2>/dev/null)" ])" \

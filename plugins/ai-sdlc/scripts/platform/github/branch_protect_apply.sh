@@ -56,5 +56,9 @@ if [ "$(printf '%s' "$changed" | jq 'length')" -gt 0 ]; then
   rm -f "$tmp"
 fi
 if [ $first_time = 1 ]; then applied="$changed"; updated='[]'; else applied='[]'; updated="$changed"; fi
+# The PUT replaces required_status_checks.contexts, so a retired review check (review.runner
+# local removes sdlc-pr-review from github.requiredChecks) disappears with this run; that is
+# reported as an updated "contexts" field, "removed" stays [] on GitHub.
+migration_remote_done
 out_json "$(jq -cn --arg b "$branch" --argjson a "$applied" --argjson up "$updated" --argjson u "$unchanged" \
-  '{branch:$b, applied:$a, updated:$up, unchanged:$u, skipped:[], platform:"github"}')"
+  '{branch:$b, applied:$a, updated:$up, unchanged:$u, skipped:[], removed:[], platform:"github"}')"

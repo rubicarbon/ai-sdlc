@@ -101,4 +101,46 @@ OUT=$(cd "$repo" && "$BIN" --platform azure --dry-run branch_protect_apply main 
 assert_eq "0" "$RC" "dry-run exits 0"
 assert_match '^\+ az ' "$OUT" "dry-run prints the commands"
 assert_eq "$snapshot" "$(cat "$POL")" "dry-run wrote no policy (mock state unchanged)"
+
+echo "-- review.runner local removes the retired sdlc-pr-review build policy and keeps a custom one"
+jq -cn '{version:1, platform:"azure", repo:{defaultBranch:"main"}, review:{requiredApprovals:2, runner:"local"},
+  azure:{organization:"https://dev.azure.com/mock-org", project:"mock-proj", repo:"mock-repo", requiredReviewers:["lead@example.com"], pipelineName:"sdlc-mock"}}' >"$repo/sdlc.config.json"
+printf '{"review-runner":{"from":"ci","to":"local","at":"2026-09-10T00:00:00Z","remote":"pending"}}\n' >"$repo/.sdlc/migrations.json" 2>/dev/null || { mkdir -p "$repo/.sdlc"; printf '{"review-runner":{"from":"ci","to":"local","at":"2026-09-10T00:00:00Z","remote":"pending"}}\n' >"$repo/.sdlc/migrations.json"; }
+# an obsolete review build policy on main, plus one on another branch that must stay
+jq -c '. + [
+  {id:950, isEnabled:true, isBlocking:true, type:{id:"0609b952-1397-4640-95ec-e00a01b2c241", displayName:"Build"},
+   settings:{buildDefinitionId:"77", displayName:"sdlc-pr-review", queueOnSourceUpdateOnly:true, manualQueueOnly:false, validDuration:720,
+             scope:[{refName:"refs/heads/main", matchKind:"Exact", repositoryId:"11111111-2222-3333-4444-555555555555"}]}},
+  {id:951, isEnabled:true, isBlocking:true, type:{id:"0609b952-1397-4640-95ec-e00a01b2c241", displayName:"Build"},
+   settings:{buildDefinitionId:"78", displayName:"sdlc-pr-review", queueOnSourceUpdateOnly:true, manualQueueOnly:false, validDuration:720,
+             scope:[{refName:"refs/heads/other", matchKind:"Exact", repositoryId:"11111111-2222-3333-4444-555555555555"}]}}]' "$POL" >"$POL.tmp" && mv "$POL.tmp" "$POL"
+snapshot_dry=$(cat "$POL")
+OUT=$(cd "$repo" && "$BIN" --platform azure --dry-run branch_protect_apply main 2>/dev/null </dev/null); RC=$?
+assert_eq "$snapshot_dry" "$(cat "$POL")" "dry-run removes nothing"
+assert_eq "pending" "$(jq -r '.["review-runner"].remote' "$repo/.sdlc/migrations.json")" "dry-run leaves the migration pending"
+apply
+assert_eq "0" "$RC" "local apply exits 0 ($ERR)"
+assert_eq '["build: sdlc-pr-review (policy 950)"]' "$(field .removed)" "the retired review build policy on main is removed"
+assert_eq "1" "$(stored '[.[] | select(.id == 951)] | length')" "the sdlc-pr-review build policy on another branch is untouched"
+assert_eq "1" "$(stored '[.[] | select(.type.displayName=="Build" and .settings.displayName=="sdlc-mock")] | length')" "the custom build policy (sdlc-mock) is kept"
+assert_eq "unchanged" "$(field '.unchanged | index("build") | if . == null then "absent" else "unchanged" end')" "the custom build policy is reported unchanged"
+assert_eq "done" "$(jq -r '.["review-runner"].remote' "$repo/.sdlc/migrations.json")" "a real apply marks the review-runner migration reconciled"
+apply
+assert_eq "[]" "$(field .removed)" "second local apply removes nothing more"
+echo "-- review.runner local without a custom pipeline: no build policy at all"
+jq -c 'del(.azure.pipelineName)' "$repo/sdlc.config.json" >"$repo/c.json" && mv "$repo/c.json" "$repo/sdlc.config.json"
+apply
+assert_eq "0" "$RC" "local apply without pipelineName exits 0 ($ERR)"
+assert_eq "4" "$(field '.unchanged|length')" "four policies managed, no build policy"
+assert_not_match 'build' "$(field '.applied + .updated + .unchanged | join(",")')" "no build policy is created without a build requirement"
+assert_eq '["approver-count","required-reviewer","work-item-linking","comment-required","build"]' "$(field '.applied + .updated + .unchanged + .removed | map(select(startswith("build") | not)) + ["build"]')" "sanity: the four kinds plus the removed build"
+echo "-- review.runner ci removes nothing"
+jq -c '.review.runner="ci" | .azure.pipelineName="sdlc-mock"' "$repo/sdlc.config.json" >"$repo/c.json" && mv "$repo/c.json" "$repo/sdlc.config.json"
+jq -c '. + [{id:952, isEnabled:true, isBlocking:true, type:{id:"0609b952-1397-4640-95ec-e00a01b2c241", displayName:"Build"},
+   settings:{buildDefinitionId:"79", displayName:"sdlc-pr-review", queueOnSourceUpdateOnly:true, manualQueueOnly:false, validDuration:720,
+             scope:[{refName:"refs/heads/main", matchKind:"Exact", repositoryId:"11111111-2222-3333-4444-555555555555"}]}}]' "$POL" >"$POL.tmp" && mv "$POL.tmp" "$POL"
+apply
+assert_eq "[]" "$(field .removed)" "runner ci never removes a build policy"
+assert_eq "1" "$(stored '[.[] | select(.id == 952)] | length')" "the sdlc-pr-review policy stays under runner ci"
+
 eval_done

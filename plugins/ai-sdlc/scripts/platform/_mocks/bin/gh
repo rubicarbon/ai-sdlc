@@ -9,6 +9,7 @@
 #   SDLC_MOCK_MALFORMED="<subcommand prefix>" print "{not json" and exit 0
 #   SDLC_MOCK_EMPTY="<subcommand prefix>"     print [] and exit 0
 #   SDLC_MOCK_GH_NO_DEPS=1                    the dependencies API answers 404
+#   SDLC_MOCK_PR_HEAD_SHA=<40 hex>            headRefOid reported by `pr view`
 set -u
 S="${SDLC_MOCK_STATE:-${TMPDIR:-/tmp}/ai-sdlc-mock-state}"; mkdir -p "$S"
 [ -n "${SDLC_MOCK_LOG:-}" ] && printf 'gh %s\n' "$*" >>"$SDLC_MOCK_LOG"
@@ -51,7 +52,8 @@ case "${1:-} ${2:-}" in
     n=$(next_id pr); echo "https://github.com/$REPO/pull/$n"; exit 0 ;;
   "pr view")
     n="$3"
-    jq -cn --arg n "$n" '{number:($n|tonumber),title:("PR "+$n),state:"OPEN",baseRefName:"main",headRefName:"feature/x",url:("https://github.com/mock-org/mock-repo/pull/"+$n),createdAt:"2026-09-01T10:00:00Z",mergedAt:null,closedAt:null,additions:120,deletions:8,changedFiles:4,reviewDecision:"REVIEW_REQUIRED",author:{login:"mock-user"}}'; exit 0 ;;
+    head_sha="${SDLC_MOCK_PR_HEAD_SHA:-1111111111111111111111111111111111111111}"
+    jq -cn --arg n "$n" --arg h "$head_sha" '{number:($n|tonumber),title:("PR "+$n),body:("Body of PR "+$n+" (AB#12)"),state:"OPEN",baseRefName:"main",headRefName:"feature/x",baseRefOid:"2222222222222222222222222222222222222222",headRefOid:$h,headRepository:{name:"mock-repo"},headRepositoryOwner:{login:"mock-org"},isCrossRepository:false,url:("https://github.com/mock-org/mock-repo/pull/"+$n),createdAt:"2026-09-01T10:00:00Z",mergedAt:null,closedAt:null,additions:120,deletions:8,changedFiles:4,reviewDecision:"REVIEW_REQUIRED",author:{login:"mock-user"}}'; exit 0 ;;
   "pr comment")
     c=$(next_id comment); echo "https://github.com/$REPO/pull/$3#issuecomment-$c"; exit 0 ;;
   "pr checks")

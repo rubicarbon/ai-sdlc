@@ -34,7 +34,8 @@
   },
   "review": {
     "requiredApprovals": 1,
-    "nitCap": 5
+    "nitCap": 5,
+    "runner": "ci"
   },
   "cost": {
     "maxTurns": 40,

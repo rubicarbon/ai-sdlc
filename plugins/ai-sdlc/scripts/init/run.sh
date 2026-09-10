@@ -5,7 +5,7 @@
 #          [--verify CMD] [--format CMD] [--lint CMD] [--envs dev,staging,prod]
 #          [--owner O --name N] [--azure-org URL --azure-project P --azure-repo R]
 #          [--max-turns N --max-budget-usd X --alert-threshold-usd Y]
-#          [--deploy-staging CMD --deploy-production CMD | --no-deploy]
+#          [--deploy-staging CMD --deploy-production CMD | --no-deploy] [--review-runner ci|local]
 #          [--yes] [--force] [--upgrade] [--only <path>]... [--check] [--dry-run]
 #
 # First run: builds sdlc.config.json from detect.sh plus flags, validates it against the schema,
@@ -36,6 +36,17 @@
 # gate-production hook covers it; on init that list starts with "git push * <default branch>"
 # and nothing else (the hook has no built-in patterns). sdlc.config.json content is never
 # rewritten by --upgrade: patterns an earlier plugin version seeded stay until edited by hand.
+# Review runner (review.runner, default ci): "ci" renders the sdlc-pr-review workflow or pipeline
+# at tier 3 (and sdlc-cost-report.yml on GitHub) and lists the ANTHROPIC_API_KEY secret among the
+# human steps; "local" renders neither, keeps github.requiredChecks free of sdlc-pr-review and
+# azure.pipelineName unset (a custom pipeline name is kept: it is a build requirement, not the
+# review), and lists the launch-local-review hook instead. --review-runner on a re-run switches:
+# the config is rewritten in memory (like --tier; --only never limits that), review files that
+# are no longer rendered are "retired" (deleted when byte-identical to what the plugin wrote,
+# kept and reported "retire-pending" when user-edited or unrecorded; --force deletes those too)
+# and the remote reconciliation (branch_protect_apply, pipeline deletion) is recorded as pending
+# in <artifacts>/migrations.json until sdlc-platform branch_protect_apply marks it done; the
+# next_steps repeat those remote steps on every run while it is pending.
 # .claude/settings.json: permission fragments are merged (union, never clobber). Deny rules an
 # earlier plugin version rendered and the current templates no longer emit
 # (SETTINGS_OBSOLETE_DENY) are removed by --upgrade / --force only, never on a first run; a
@@ -50,7 +61,7 @@ RENDER="$SDLC_PLUGIN_ROOT/scripts/init/render.sh"
 
 dir="$PWD"; platform=""; tier=""; team=""; verify=""; format_cmd=""; lint_cmd=""; envs="dev,staging,prod"
 owner=""; name=""; az_org=""; az_project=""; az_repo=""; max_turns=""; max_budget=""; alert=""
-deploy_staging=""; deploy_production=""; no_deploy=0
+deploy_staging=""; deploy_production=""; no_deploy=0; review_runner=""
 force=0; upgrade=0; check=0; dry=0; only=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,6 +70,7 @@ while [ $# -gt 0 ]; do
     --deploy-staging) deploy_staging="$2"; shift 2 ;;
     --deploy-production) deploy_production="$2"; shift 2 ;;
     --no-deploy) no_deploy=1; shift ;;
+    --review-runner) review_runner="$2"; shift 2 ;;
     --platform) platform="$2"; shift 2 ;;
     --tier) tier="$2"; shift 2 ;;
     --team) team="$2"; shift 2 ;;
@@ -84,6 +96,7 @@ while [ $# -gt 0 ]; do
 done
 case "${tier:-0}" in 0|1|2|3) ;; *) sdlc_die 2 "run.sh: --tier must be 0, 1, 2 or 3 (got '$tier')" ;; esac
 case "${platform:-github}" in github|azure|both|none) ;; *) sdlc_die 2 "run.sh: --platform must be github, azure, both or none (got '$platform')" ;; esac
+case "${review_runner:-ci}" in ci|local) ;; *) sdlc_die 2 "run.sh: --review-runner must be ci or local (got '$review_runner')" ;; esac
 cd "$dir" 2>/dev/null || sdlc_die 1 "run.sh: cannot cd to $dir"
 dir=$(pwd -P)
 { [ -d .git ] || [ -f .git ]; } || sdlc_die 1 "run.sh: $dir is not the root of a git repository (run git init there first)"
@@ -98,6 +111,25 @@ if [ -f sdlc.config.json ]; then
   config=$(<sdlc.config.json)
   [ -n "$platform" ] && [ "$platform" != "$(jq -r .platform <<<"$config")" ] && note "ignoring --platform: sdlc.config.json already says $(jq -r .platform <<<"$config") (edit the file to change it)"
   [ -n "$tier" ] && [ "$tier" != "$(jq -r .tier <<<"$config")" ] && { config=$(jq -c --argjson t "$tier" '.tier=$t' <<<"$config"); mode=retier; note "tier changed to $tier"; }
+  # --review-runner on a re-run: switch the runner and keep the two derived settings consistent.
+  # local: sdlc-pr-review leaves github.requiredChecks; azure.pipelineName goes only when it is
+  # the review pipeline itself (a custom build requirement stays). ci: both come back when absent.
+  # An explicit azure.pipelineName of sdlc-pr-review is exactly the value local removes, so the
+  # combination never survives. The remote side is recorded as pending in migrations.json.
+  cur_runner=$(jq -r '.review.runner // "ci"' <<<"$config")
+  if [ -n "$review_runner" ] && [ "$review_runner" != "$cur_runner" ]; then
+    config=$(jq -c --arg rr "$review_runner" '
+      .review = ((.review // {}) + {runner: $rr})
+      | if $rr == "local" then
+          (if .github then .github.requiredChecks = ((.github.requiredChecks // []) - ["sdlc-pr-review"]) else . end)
+          | (if .azure and .azure.pipelineName == "sdlc-pr-review" then del(.azure.pipelineName) else . end)
+        else
+          (if .github then .github.requiredChecks = ((.github.requiredChecks // []) | if any(.[]; . == "sdlc-pr-review") then . else . + ["sdlc-pr-review"] end) else . end)
+          | (if .azure then .azure.pipelineName = (.azure.pipelineName // "sdlc-pr-review") else . end)
+        end' <<<"$config")
+    migration_switch="$cur_runner:$review_runner"
+    note "review runner changed to $review_runner (the remote side follows: run sdlc-platform branch_protect_apply <branch>)"
+  fi
 else
   [ -n "$platform" ] || platform=$(jq -r .platform <<<"$detected")
   [ -n "$tier" ] || tier=0
@@ -137,7 +169,7 @@ else
     --arg verify "$verify" --arg fmt "$format_cmd" --arg lint "$lint_cmd" --argjson envs "$env_json" \
     --arg ds "$deploy_staging" --arg dp "$deploy_production" \
     --arg azo "$az_org" --arg azp "$az_project" --arg azr "$az_repo" --arg reuse "$reuse" \
-    --arg mt "${max_turns:-40}" --arg mb "${max_budget:-5}" --arg at "${alert:-25}" '
+    --arg mt "${max_turns:-40}" --arg mb "${max_budget:-5}" --arg at "${alert:-25}" --arg rr "${review_runner:-ci}" '
     { "$schema": "https://raw.githubusercontent.com/rubicarbon/ai-sdlc/main/sdlc.config.schema.json",
       version: 1, pluginVersion: $pv, platform: $platform, tier: $tier,
       repo: {owner: $owner, name: $name, defaultBranch: $branch},
@@ -146,13 +178,13 @@ else
                  | with_entries(select(.value != ""))),
       environments: $envs,
       team: {mode: $team, enablePluginForTeam: ($team == "team"), codeowners: ("@" + $owner), securityOwners: ("@" + $owner)},
-      review: {requiredApprovals: 1, nitCap: 5},
+      review: {requiredApprovals: 1, nitCap: 5, runner: $rr},
       cost: {maxTurns: ($mt|tonumber), maxBudgetUsd: ($mb|tonumber), alertThresholdUsd: ($at|tonumber)},
       artifacts: {dir: ".sdlc"},
       metrics: {incidentLabel: "incident", deployEnvironment: "production", maxPrs: 200},
-      github: {requiredChecks: ["sdlc-pr-review"], deployWorkflow: "sdlc-deploy.yml"},
+      github: {requiredChecks: (if $rr == "local" then [] else ["sdlc-pr-review"] end), deployWorkflow: "sdlc-deploy.yml"},
       reuse: {mattpocockSkills: $reuse} }
-    | if $platform == "azure" or $platform == "both" then .azure = {organization: $azo, project: $azp, repo: $azr, workItemType: "User Story", requiredReviewers: [], pipelineName: "sdlc-pr-review", deployPipelineName: "sdlc-deploy"} else . end
+    | if $platform == "azure" or $platform == "both" then .azure = ({organization: $azo, project: $azp, repo: $azr, workItemType: "User Story", requiredReviewers: [], deployPipelineName: "sdlc-deploy"} + (if $rr == "local" then {} else {pipelineName: "sdlc-pr-review"} end)) else . end
     | if $platform == "none" then del(.github) else . end')
   [ -n "$mp_ver" ] && config=$(jq -c --arg v "$mp_ver" '.reuse.mattpocockSkillsVersion=$v' <<<"$config") && config=$(jq -c 'del(.reuse.mattpocockSkillsVersion)' <<<"$config")
 fi
@@ -174,6 +206,17 @@ if [ -n "$prod_cmd" ]; then
 fi
 tier=$(jq -r .tier <<<"$config"); platform=$(jq -r .platform <<<"$config"); team=$(jq -r '.team.mode // "solo"' <<<"$config")
 art=$(jq -r '.artifacts.dir // ".sdlc"' <<<"$config")
+runner=$(jq -r '.review.runner // "ci"' <<<"$config")
+# the Azure build requirement: azure.pipelineName when set, else sdlc-pr-review for runner ci, else none
+az_pipeline=$(jq -r 'if (.azure.pipelineName // "") != "" then .azure.pipelineName elif (.review.runner // "ci") == "ci" then "sdlc-pr-review" else "" end' <<<"$config")
+[ "$runner" = local ] && [ "$az_pipeline" = sdlc-pr-review ] && sdlc_die 2 "run.sh: review.runner is local but azure.pipelineName names the review pipeline sdlc-pr-review; remove that value (a custom build requirement may stay) and re-run"
+migrations_file="$art/migrations.json"
+[ -f "$migrations_file" ] && migrations=$(jq -c . "$migrations_file" 2>/dev/null || echo '{}') || migrations='{}'
+if [ -n "${migration_switch:-}" ]; then
+  migrations=$(jq -c --arg from "${migration_switch%%:*}" --arg to "${migration_switch##*:}" --arg at "$(sdlc_iso_now)" \
+    '.["review-runner"] = {from: $from, to: $to, at: $at, remote: "pending"}' <<<"$migrations")
+fi
+migration_pending=$(jq -r '.["review-runner"].remote == "pending"' <<<"$migrations")
 
 primary="$platform"; [ "$primary" = both ] && primary=$(jq -r .platform <<<"$detected"); [ "$primary" = none ] && primary=""
 [ "$platform" = both ] && [ -z "$primary" ] && primary=github
@@ -250,6 +293,31 @@ artifact_dir() {
   if [ $check = 1 ] || [ $dry = 1 ]; then add_status "$d/" missing ""; return; fi
   mkdir -p "$d" && : >"$d/.gitkeep" || sdlc_die 1 "cannot create $d"
   writes=$((writes+1)); add_status "$d/" installed ""
+}
+
+# retire <dest>: a managed file the current configuration no longer renders (the review
+# workflow files under review.runner local). Recorded and byte-identical to what the plugin
+# wrote -> deleted, record dropped, status "retired". Recorded but different, or present but
+# never recorded -> kept, status "retire-pending" (it counts as pending: --check exits 1 and the
+# message says to delete it or re-run with --force); --force deletes it. --check / --dry-run
+# only report; --only applies. Absent and unrecorded -> no entry.
+retire() {
+  local dest="$1" cur_hash rec_hash
+  rec_hash=$(jq -r --arg d "$dest" '.[$d].sha256 // empty' <<<"$recorded")
+  if [ ! -f "$dest" ]; then
+    [ -n "$rec_hash" ] || return 0
+    # recorded but already gone: drop the record quietly (not under --check / --dry-run)
+    [ $check = 1 ] || [ $dry = 1 ] || recorded=$(jq -c --arg d "$dest" 'del(.[$d])' <<<"$recorded")
+    return 0
+  fi
+  cur_hash=$(sdlc_sha256 "$dest")
+  if [ $check = 1 ] || [ $dry = 1 ] || ! only_allows "$dest"; then add_status "$dest" retire-pending ""; return; fi
+  if { [ -n "$rec_hash" ] && [ "$cur_hash" = "$rec_hash" ]; } || [ $force = 1 ]; then
+    rm -f "$dest"; writes=$((writes+1)); add_status "$dest" retired ""
+    recorded=$(jq -c --arg d "$dest" 'del(.[$d])' <<<"$recorded")
+  else
+    add_status "$dest" retire-pending ""
+  fi
 }
 
 # create_once <template> <dest>: rendered on first run, then owned by the user (never compared)
@@ -359,6 +427,10 @@ if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
       github)
         for w in "$T"/github/workflows/*.yml; do
           [ "${w##*/}" = sdlc-deploy.yml ] && [ $render_deploy = 0 ] && continue
+          case "${w##*/}" in sdlc-pr-review.yml|sdlc-cost-report.yml)
+            # the review runner owns these two: runner local retires them instead
+            [ "$runner" = local ] && { retire ".github/workflows/${w##*/}"; continue; } ;;
+          esac
           manage "github/workflows/${w##*/}" ".github/workflows/${w##*/}"
         done
         manage github/PULL_REQUEST_TEMPLATE.md .github/PULL_REQUEST_TEMPLATE.md
@@ -366,10 +438,16 @@ if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
       azure)
         for w in "$T"/azure/pipelines/*.yml; do
           [ "${w##*/}" = sdlc-deploy.yml ] && [ $render_deploy = 0 ] && continue
+          [ "${w##*/}" = sdlc-pr-review.yml ] && [ "$runner" = local ] && { retire ".azuredevops/pipelines/${w##*/}"; continue; }
           manage "azure/pipelines/${w##*/}" ".azuredevops/pipelines/${w##*/}"
         done
         manage azure/pull_request_template.md .azuredevops/pull_request_template.md
-        manage azure/branch-policies.json .azuredevops/branch-policies.json --var "REVIEW_REQUIRED_APPROVALS=$(jq -r '.review.requiredApprovals // 1' <<<"$config")" --var "AZURE_PIPELINE_NAME=$(jq -r '.azure.pipelineName // "sdlc-pr-review"' <<<"$config")" ;;
+        # the build policy follows the build requirement (az_pipeline); none -> the local template without it
+        if [ -n "$az_pipeline" ]; then
+          manage azure/branch-policies.json .azuredevops/branch-policies.json --var "REVIEW_REQUIRED_APPROVALS=$(jq -r '.review.requiredApprovals // 1' <<<"$config")" --var "AZURE_PIPELINE_NAME=$az_pipeline"
+        else
+          manage azure/branch-policies-local.json .azuredevops/branch-policies.json --var "REVIEW_REQUIRED_APPROVALS=$(jq -r '.review.requiredApprovals // 1' <<<"$config")"
+        fi ;;
     esac
   done
 fi
@@ -378,6 +456,7 @@ fi
 if [ $check = 0 ] && [ $dry = 0 ]; then
   if [ ! -f sdlc.config.json ] || [ "$(jq -c . sdlc.config.json)" != "$(jq -c . "$cfg_tmp")" ]; then cp "$cfg_tmp" sdlc.config.json; writes=$((writes+1)); add_status sdlc.config.json "$( [ $mode = init ] && echo installed || echo updated )" ""; else add_status sdlc.config.json unchanged ""; fi
   mkdir -p "$art"; jq . <<<"$recorded" >"$manifest"
+  if [ "$migrations" != '{}' ] && { [ ! -f "$migrations_file" ] || [ "$(jq -c . "$migrations_file" 2>/dev/null)" != "$migrations" ]; }; then jq . <<<"$migrations" >"$migrations_file"; writes=$((writes+1)); fi
 else
   add_status sdlc.config.json "$( [ -f sdlc.config.json ] && echo unchanged || echo missing )" ""
 fi
@@ -385,7 +464,7 @@ rm -f "$cfg_tmp"
 
 statuses_json=$(printf '%s\n' "${statuses[@]}" | jq -cs .)
 # drift = the plugin moved or a file is missing; a user-edited file is the user's business (reported, not drift)
-pending=$(jq -c '[.[] | select(.status | IN("template-changed","missing"))]' <<<"$statuses_json")
+pending=$(jq -c '[.[] | select(.status | IN("template-changed","missing","retire-pending"))]' <<<"$statuses_json")
 n_pending=$(jq 'length' <<<"$pending")
 user_edited=$(jq -c '[.[] | select(.status == "user-edited")]' <<<"$statuses_json")
 
@@ -403,13 +482,30 @@ esac
 [ "$tier" -ge 2 ] && [ -n "$primary" ] && steps+=("Protect the default branch (human approval required to merge): sdlc-platform branch_protect_apply $(jq -r '.repo.defaultBranch // "main"' <<<"$config")")
 if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
   steps+=("Commit the CI files, then register them: sdlc-platform ci_workflow_install")
-  steps+=("Create the CI secret ANTHROPIC_API_KEY and the production approval rule (GitHub environment 'production' with required reviewers, or the Azure environment's Approvals check): see docs/PLATFORM-SETUP.md.")
+  steps+=("Create the production approval rule (GitHub environment 'production' with required reviewers, or the Azure environment's Approvals check): see docs/PLATFORM-SETUP.md.")
+  if [ "$runner" = local ]; then
+    steps+=("Review runner is local: no ANTHROPIC_API_KEY secret is needed. After sdlc-platform pr_create (or gh pr create / az repos pr create) the launch-local-review hook opens a terminal window running /ai-sdlc:sdlc-review --pr <id> with your own Claude login; it reviews the PR head in an isolated worktree, saves $art/verify/<date>-<sha>-pr<id>-security.md and posts it on the PR. Launch state lives under $art/tmp/review/ (scripts/review/status.sh). 'claude' must be on PATH in the terminal that runs Claude Code.")
+  else
+    steps+=("Create the CI secret ANTHROPIC_API_KEY (GitHub repository secret, or the Azure variable group sdlc-secrets): see docs/PLATFORM-SETUP.md sections 2 and 8.")
+  fi
   if [ $render_deploy = 1 ]; then
     steps+=("The deploy workflow runs commands.deployStaging and commands.deployProduction from sdlc.config.json with SDLC_ENVIRONMENT and SDLC_SHA exported; the production command is covered by the gate-production hook (environments.prod.deployCommandPatterns).")
   else
     steps+=("Deployment automation was omitted ($deploy_omitted): no deploy workflow was rendered. To add it, re-run with --deploy-staging CMD --deploy-production CMD (SDLC_ENVIRONMENT and SDLC_SHA are exported to the commands).")
   fi
 fi
+if [ "$migration_pending" = true ] && [ -n "$primary" ]; then
+  to=$(jq -r '.["review-runner"].to' <<<"$migrations")
+  steps+=("Review runner migration to '$to' is not reconciled on $primary yet: run sdlc-platform branch_protect_apply $(jq -r '.repo.defaultBranch // "main"' <<<"$config") so the required checks / build policy follow the new runner (it records the reconciliation in $art/migrations.json).")
+  if [ "$to" = local ]; then
+    case "$primary" in
+      azure) steps+=("Delete the retired review pipeline definition: az pipelines delete --name sdlc-pr-review (or in the portal), after removing .azuredevops/pipelines/sdlc-pr-review.yml from the default branch.") ;;
+      github) steps+=("sdlc-platform pr_checks and the ship gate never pass with zero checks: keep at least one CI workflow that reports a check on pull requests (sdlc-evals.yml runs only on config paths).") ;;
+    esac
+  fi
+fi
+retire_pending=$(jq -r '[.[] | select(.status == "retire-pending") | .path] | join(", ")' <<<"$statuses_json")
+[ -n "$retire_pending" ] && steps+=("Retired review files still present ($retire_pending): they were edited or never recorded, so they were kept. Delete them yourself or re-run with --force.")
 [ "$team" = team ] && steps+=("Commit .claude/settings.json: teammates get ai-sdlc and mattpocock-skills enabled automatically.")
 steps+=("Commit the rendered files.")
 if [ "$tier" -eq 0 ]; then steps+=("Capture the metrics baseline NOW, before Tier 1 changes how work flows: /ai-sdlc:sdlc-metrics-baseline"); else steps+=("Metrics baseline: it must be taken before Tier 1. You started at tier $tier, so run /ai-sdlc:sdlc-metrics-baseline --force once to record a late baseline (it is labelled as such)."); fi
@@ -429,6 +525,6 @@ if [ $check = 1 ]; then
   [ "$n_pending" -eq 0 ] && exit 0
   jq -r '.[] | "ai-sdlc: \(.status): \(.path)"' <<<"$pending" >&2; exit 1
 fi
-[ "$n_pending" -gt 0 ] && jq -r '.[] | "ai-sdlc: \(.status): \(.path) " + (if .status == "template-changed" then "(re-run with --upgrade to apply the template change)" else "(created by a run without --check / --dry-run" + (if .template != "" then ", subject to --only" else "" end) + ")" end)' <<<"$pending" >&2
+[ "$n_pending" -gt 0 ] && jq -r '.[] | "ai-sdlc: \(.status): \(.path) " + (if .status == "template-changed" then "(re-run with --upgrade to apply the template change)" elif .status == "retire-pending" then "(no longer rendered for review.runner; edited or unrecorded, so kept: delete it or re-run with --force)" else "(created by a run without --check / --dry-run" + (if .template != "" then ", subject to --only" else "" end) + ")" end)' <<<"$pending" >&2
 [ "$(jq length <<<"$user_edited")" -gt 0 ] && jq -r '.[] | "ai-sdlc: user-edited: \(.path) (kept; --force overwrites)"' <<<"$user_edited" >&2
 exit 0

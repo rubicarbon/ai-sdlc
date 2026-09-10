@@ -100,4 +100,29 @@ assert_eq "" "$OUT" "github: no JSON verdict on a CLI failure"
 SDLC_MOCK_FAIL="repos pr policy" run azure "$azok"
 assert_eq "1" "$RC" "azure: az failure exits 1"
 assert_match 'ai-sdlc: az repos pr policy list --id 7 failed \(exit 1\)' "$ERR" "azure: failure message names the command"
+
+echo "-- review.runner local: the review pipeline is no longer required, a custom build requirement still is"
+azl="$EVAL_TMP/azl"
+mkrepo "$azl" '{"version":1,"platform":"azure","repo":{"defaultBranch":"main"},"review":{"runner":"local"},"azure":{"organization":"https://dev.azure.com/mock-org","project":"mock-proj","repo":"mock-repo"}}'
+SDLC_MOCK_CHECKS=pass run azure "$azl"
+assert_eq "0" "$RC" "azure local without pipelineName: pass exits 0"
+assert_eq "[]" "$(printf '%s' "$OUT" | jq -c .required)" "azure local without pipelineName: required is []"
+SDLC_MOCK_CHECKS=empty run azure "$azl"
+assert_eq "1" "$RC" "azure local: zero evaluations still fail closed"
+azc="$EVAL_TMP/azc"
+mkrepo "$azc" '{"version":1,"platform":"azure","repo":{"defaultBranch":"main"},"review":{"runner":"local"},"azure":{"organization":"https://dev.azure.com/mock-org","project":"mock-proj","repo":"mock-repo","pipelineName":"custom-ci"}}'
+SDLC_MOCK_CHECKS=pass run azure "$azc"
+assert_eq "1" "$RC" "azure local with a custom pipelineName: that pipeline is required and missing"
+assert_eq '["custom-ci"]' "$(printf '%s' "$OUT" | jq -c .required)" "azure local: required is the custom pipeline"
+azci="$EVAL_TMP/azci"
+mkrepo "$azci" '{"version":1,"platform":"azure","repo":{"defaultBranch":"main"},"review":{"runner":"ci"},"azure":{"organization":"https://dev.azure.com/mock-org","project":"mock-proj","repo":"mock-repo"}}'
+SDLC_MOCK_CHECKS=pass run azure "$azci"
+assert_eq '["sdlc-pr-review"]' "$(printf '%s' "$OUT" | jq -c .required)" "azure ci without pipelineName: sdlc-pr-review is the default requirement"
+ghl="$EVAL_TMP/ghl"
+mkrepo "$ghl" '{"version":1,"platform":"github","repo":{"owner":"mock-org","name":"mock-repo"},"review":{"runner":"local"},"github":{"requiredChecks":[]}}'
+SDLC_MOCK_CHECKS=pass run github "$ghl"
+assert_eq "0" "$RC" "github local: other passing checks satisfy pr_checks"
+SDLC_MOCK_CHECKS=empty run github "$ghl"
+assert_eq "1" "$RC" "github local: zero checks still fail closed (a CI check must report on the PR)"
+
 eval_done

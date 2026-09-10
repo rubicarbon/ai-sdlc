@@ -22,7 +22,7 @@ approvals=$(read_config '.review.requiredApprovals' 1)
 [[ "$approvals" =~ ^[0-9]+$ ]] || approvals=1
 required=$(config_array '.azure.requiredReviewers')
 raw=$(cli_json "az repos pr show --id $id" az repos pr show --id "$id" "${AZ_ARGS[@]}" -o json) || exit $?
-out_json "$(printf '%s' "$raw" | jq -c --arg fallback "$AZ_ORG/$AZ_PROJECT/_git/$AZ_REPO" \
+out_json "$(printf '%s' "$raw" | jq -c --arg fallback "$AZ_ORG/$AZ_PROJECT/_git/$AZ_REPO" --arg azp "$AZ_PROJECT" --arg azr "$AZ_REPO" \
   --argjson need "$approvals" --argjson required "$required" '
   def lc: (. // "") | tostring | ascii_downcase;
   (.reviewers // []) as $r
@@ -35,10 +35,15 @@ out_json "$(printf '%s' "$raw" | jq -c --arg fallback "$AZ_ORG/$AZ_PROJECT/_git/
   | (all($names[]; . as $n | any($others[]; (.vote // 0) >= 5
         and ((.uniqueName|lc) == $n or (.displayName|lc) == $n or (.id|lc) == $n)))) as $named_ok
   | (all($others[] | select(.isRequired == true); (.vote // 0) >= 5)) as $flagged_ok
+  | (.forkSource.repository // null) as $fork
   | {
-    id: (.pullRequestId|tostring), title,
+    id: (.pullRequestId|tostring), title, body: (.description // ""),
     state: (if .status=="completed" then "merged" elif .status=="abandoned" then "closed" else "open" end),
     base: ((.targetRefName // "") | ltrimstr("refs/heads/")), head: ((.sourceRefName // "") | ltrimstr("refs/heads/")),
+    base_sha: (.lastMergeTargetCommit.commitId // null), head_sha: (.lastMergeSourceCommit.commitId // null),
+    head_repo: (if $fork then (($fork.project.name // $azp) + "/" + ($fork.name // "")) else ($azp + "/" + $azr) end),
+    head_repo_url: (if $fork then ($fork.remoteUrl // $fork.webUrl // null) else (.repository.remoteUrl // .repository.webUrl // $fallback) end),
+    is_fork: ($fork != null),
     url: ((.repository.webUrl // $fallback) + "/pullrequest/" + (.pullRequestId|tostring)),
     created_at: .creationDate, merged_at: (if .status=="completed" then .closedDate else null end),
     closed_at: (.closedDate // null),

@@ -25,6 +25,14 @@
           { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate-production.sh"], "timeout": 10 }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          { "type": "command", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/launch-local-review.sh"], "timeout": 10 }
+        ]
+      }
     ]
   }
 }

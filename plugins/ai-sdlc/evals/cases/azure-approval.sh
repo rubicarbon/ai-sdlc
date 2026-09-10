@@ -53,6 +53,6 @@ assert_eq "approved" "$(decision "$one" "[$A]")" "full approval -> approved"
 echo "-- default mock reviewers and key set unchanged"
 out=$(cd "$one" && "$BIN" --platform azure pr_get 5 2>/dev/null)
 assert_eq "pending" "$(printf '%s' "$out" | jq -r .review_decision)" "default mock reviewer (vote 0) is pending"
-assert_eq '["additions","author","base","changed_files","closed_at","created_at","deletions","head","id","merged_at","platform","review_decision","state","title","url"]' \
+assert_eq '["additions","author","base","base_sha","body","changed_files","closed_at","created_at","deletions","head","head_repo","head_repo_url","head_sha","id","is_fork","merged_at","platform","review_decision","state","title","url"]' \
   "$(printf '%s' "$out" | jq -c 'keys')" "pr_get key set unchanged"
 eval_done

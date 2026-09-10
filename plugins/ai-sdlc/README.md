@@ -1,6 +1,6 @@
 # ai-sdlc
 
-Claude Code plugin that turns a software project into an AI-native SDLC workspace. It supplies the outer loop (a GitHub and Azure DevOps adapter behind one contract, two targeted hooks for secrets and configured production commands, read-only verifier and security-auditor subagents, CI review with cost caps, DORA metrics, evals) around the inner loop provided by the `mattpocock-skills` plugin (grill, spec, tickets, implement, tdd, code review).
+Claude Code plugin that turns a software project into an AI-native SDLC workspace. It supplies the outer loop (a GitHub and Azure DevOps adapter behind one contract, two targeted hooks for secrets and configured production commands, read-only verifier and security-auditor subagents, a PR review in CI with cost caps or in a fresh local session (`review.runner`), DORA metrics, evals) around the inner loop provided by the `mattpocock-skills` plugin (grill, spec, tickets, implement, tdd, code review).
 
 ## Install
 
@@ -23,6 +23,7 @@ Claude Code plugin that turns a software project into an AI-native SDLC workspac
 | `sdlc-start` | Frames a change with `grilling` and `domain-modeling`, then hands off to `/mattpocock-skills:to-spec` |
 | `sdlc-publish` | Pushes a local spec and tickets to the tracker with blocking edges and writes the ids back |
 | `sdlc-verify` | Runs the `sdlc-verifier` subagent (optionally the security auditor) and stores the report under `.sdlc/verify/` |
+| `sdlc-review` | Reviews one pull request in a fresh session (`review.runner: local`; opened by the `launch-local-review` hook or by hand): exact PR head in an isolated worktree, security audit plus spec compliance, one report posted on the PR and published under `.sdlc/verify/` |
 | `sdlc-ship` | Release preflight, release notes, rollback rehearsal; waits for a human's `authorize.sh` |
 | `sdlc-postmortem` | Writes an incident or defect-escape postmortem under `.sdlc/postmortems/` |
 | `sdlc-metrics-baseline` | Captures the pre-adoption metrics baseline (refused after tier 1 unless forced) |
@@ -56,6 +57,7 @@ Claude Code plugin that turns a software project into an AI-native SDLC workspac
 | `guard-protected-paths` | PreToolUse | Denies edits to `guardrails.protectedPaths` (nothing by default) and always to the release-authorisation markers |
 | `guard-verifier-readonly` | PreToolUse | Denies file edits from the verifier and auditor agents (their shell is unrestricted) |
 | `gate-production` | PreToolUse | Denies commands listed in `environments.prod.deployCommandPatterns` without a fresh `.sdlc/release/AUTHORIZED-<sha>`; no built-in patterns |
+| `launch-local-review` | PostToolUse | Never denies. With `review.runner: local`, opens a terminal running `/ai-sdlc:sdlc-review --pr <id>` after a PR was created (or an unreviewed commit of a PR branch was pushed) and tells the author session to wait for state `posted` |
 
 Every hook exits 0 silently in a repository without `sdlc.config.json`. Nothing gates source, test, lockfile, CI or config edits, installs, scripts or staging deploys; formatting and linting run after a change, not per edit.
 

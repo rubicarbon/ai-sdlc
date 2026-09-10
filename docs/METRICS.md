@@ -129,7 +129,7 @@ The rendered report ends with three sentences under "Reading these numbers". The
 
 Agent spend is tracked per CI run and aggregated into cost per merged PR.
 
-**Where it is produced.** The rendered `sdlc-pr-review` workflow (GitHub) and pipeline (Azure) both end by writing `sdlc-cost.json`:
+**Where it is produced.** With `review.runner: ci` the rendered `sdlc-pr-review` workflow (GitHub) and pipeline (Azure) both end by writing `sdlc-cost.json` (with `review.runner: local` the review runs on the developer's own login and no cost record exists):
 
 ```json
 {"run_id":"...","pr":123,"total_cost_usd":1.42,"num_turns":18,"recorded_at":"2026-09-01T10:00:00Z"}

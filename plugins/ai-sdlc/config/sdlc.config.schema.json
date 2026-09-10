@@ -60,7 +60,10 @@
       "type": "object", "additionalProperties": false,
       "properties": {
         "requiredApprovals": { "type": "integer", "minimum": 1, "maximum": 6 },
-        "nitCap": { "type": "integer", "minimum": 0, "maximum": 50 }
+        "nitCap": { "type": "integer", "minimum": 0, "maximum": 50 },
+        "runner": { "type": "string", "enum": ["ci", "local"], "description": "Where the advisory pull-request review runs. ci (default): the rendered sdlc-pr-review workflow or pipeline, which needs the ANTHROPIC_API_KEY secret. local: no review workflow is rendered or installed; after a PR is created the launch-local-review hook opens a terminal window running /ai-sdlc:sdlc-review with the developer's own Claude login. With local, github.requiredChecks must not name sdlc-pr-review and azure.pipelineName, when set, names a custom build requirement, never the review pipeline." },
+        "localLauncher": { "type": "string", "minLength": 1, "description": "Optional command template the launch-local-review hook runs with bash -c instead of its built-in terminal detection (wt.exe, cmd start, open, x-terminal-emulator). Placeholders: {script} (launcher script path), {cwd} (project directory), {title} (window title)." },
+        "localAuth": { "type": "string", "enum": ["login", "inherit"], "description": "Environment policy for the local review session. login (default): every ANTHROPIC_* variable and the CLAUDE_CODE_OAUTH_TOKEN / CLAUDE_CODE_USE_* provider switches are removed so the session falls back to the /login credentials. inherit: authentication and provider variables are kept. Session-state variables of the launching session are always removed." }
       }
     },
     "cost": {

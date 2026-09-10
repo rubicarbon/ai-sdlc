@@ -43,7 +43,7 @@ Expected: `ai-sdlc@ai-sdlc-kit` enabled, version `0.1.0`. Quick alternative: `cl
 claude plugin details ai-sdlc@ai-sdlc-kit
 ```
 
-Expected, each namespaced `ai-sdlc:`: commands `sdlc-init`, `sdlc-status`, `sdlc-upgrade`, `sdlc-start`, `sdlc-publish`, `sdlc-verify`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics-baseline`, `sdlc-metrics-report`; skills `sdlc-loop`, `sdlc-platform`, `sdlc-publish`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics`, `sdlc-security-review`; agents `sdlc-verifier`, `sdlc-security-auditor`, `sdlc-metrics-analyst`; hooks: `PreToolUse` in 4 matcher groups (4 scripts: `guard-secrets`, `guard-protected-paths`, `guard-verifier-readonly`, `gate-production`), no `PostToolUse` hooks.
+Expected, each namespaced `ai-sdlc:`: commands `sdlc-init`, `sdlc-status`, `sdlc-upgrade`, `sdlc-start`, `sdlc-publish`, `sdlc-verify`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics-baseline`, `sdlc-metrics-report`; skills `sdlc-loop`, `sdlc-platform`, `sdlc-publish`, `sdlc-ship`, `sdlc-postmortem`, `sdlc-metrics`, `sdlc-security-review`; agents `sdlc-verifier`, `sdlc-security-auditor`, `sdlc-metrics-analyst`; hooks: `PreToolUse` in 4 matcher groups (4 scripts: `guard-secrets`, `guard-protected-paths`, `guard-verifier-readonly`, `gate-production`) and one `PostToolUse` group on `Bash|PowerShell` (`launch-local-review`); commands also include `sdlc-review`.
 
 ### B3. Hooks fire with `${CLAUDE_PLUGIN_ROOT}` resolved
 
@@ -201,3 +201,13 @@ shellcheck -S warning hooks/*.sh scripts/*.sh scripts/*/*.sh scripts/platform/*/
 ```
 
 Expected: no output and exit 0. The repository CI runs both tools; a red `ci` job on the first push after this build is the expected way to learn about a finding neither tool could produce locally.
+
+### C8. Local review runner (Windows, manual)
+
+In a scratch repository with `review.runner: local` (`run.sh --tier 3 --review-runner local --no-deploy`), feed the hook one PostToolUse payload without `SDLC_LAUNCH_DRY_RUN`:
+
+```
+printf '%s' '{"cwd":"'"$PWD"'","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"gh pr create"},"tool_response":{"stdout":"https://github.com/<owner>/<repo>/pull/42"}}' | bash "$CLAUDE_PLUGIN_ROOT/hooks/launch-local-review.sh"
+```
+
+Expected: a Windows Terminal window opens running `claude "/ai-sdlc:sdlc-review --launch <id> --pr 42"`; `env | grep -E 'CLAUDE|ANTHROPIC'` in that window shows only `CLAUDE_CONFIG_DIR`; `.sdlc/tmp/review/launch-<id>.json` moved from `requested` to `started`; the hook's JSON note says the window opened. Close the window without finishing: the state becomes `abandoned` (immediately through the launcher's trap, or after `SDLC_REVIEW_STALE_MINUTES` through `status.sh sweep`). Then, in the target repository: `/ai-sdlc:sdlc-init --review-runner local` retires the review workflow and lists the remote steps; `sdlc-platform branch_protect_apply main` drops the check and marks `.sdlc/migrations.json` done; open a real PR: window, report `.sdlc/verify/<date>-<sha12>-pr<id>-security.md`, PR comment, state `posted`; push a fix commit: a second launch for the new head; `preflight.sh --pr <id>` selects the PR-bound report.
