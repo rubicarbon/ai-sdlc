@@ -101,7 +101,7 @@ Formatting, linting and verification are the agent's job after a coherent change
 sdlc.config.schema.json             byte copy of the plugin schema, for editors
 docs/                               ARCHITECTURE, REUSE, ADOPTION, METRICS, SECURITY
 plugins/ai-sdlc/
-  .claude-plugin/plugin.json        name ai-sdlc, version 0.1.0
+  .claude-plugin/plugin.json        name ai-sdlc, version 0.1.1
   commands/                         /ai-sdlc:sdlc-* slash commands
   skills/                           model-invocable skills (sdlc-loop is the router)
   agents/                           sdlc-verifier, sdlc-security-auditor, sdlc-metrics-analyst

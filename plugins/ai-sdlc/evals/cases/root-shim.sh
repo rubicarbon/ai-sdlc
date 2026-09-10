@@ -7,12 +7,12 @@ probe() {  # probe [env...] -> prints "<root>|<source>|<version>" via a child ba
 }
 pn=$(cd "$P" && pwd -P)
 
-out=$(probe CLAUDE_PLUGIN_ROOT="$pn");           assert_eq "$pn|CLAUDE_PLUGIN_ROOT|0.1.0" "$out" "variable set to the real root is used"
-out=$(probe -u CLAUDE_PLUGIN_ROOT);              assert_eq "$pn|script-path|0.1.0" "$out" "variable unset falls back to the script path"
-out=$(probe CLAUDE_PLUGIN_ROOT=);                assert_eq "$pn|script-path|0.1.0" "$out" "variable empty falls back to the script path"
-out=$(probe CLAUDE_PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'); assert_eq "$pn|script-path|0.1.0" "$out" "literal unexpanded placeholder falls back to the script path"
-out=$(probe CLAUDE_PLUGIN_ROOT=/);               assert_eq "$pn|script-path|0.1.0" "$out" "variable '/' is rejected, never used"
-out=$(probe CLAUDE_PLUGIN_ROOT="$EVAL_TMP");     assert_eq "$pn|script-path|0.1.0" "$out" "variable pointing at a non-plugin dir is rejected"
+out=$(probe CLAUDE_PLUGIN_ROOT="$pn");           assert_eq "$pn|CLAUDE_PLUGIN_ROOT|0.1.1" "$out" "variable set to the real root is used"
+out=$(probe -u CLAUDE_PLUGIN_ROOT);              assert_eq "$pn|script-path|0.1.1" "$out" "variable unset falls back to the script path"
+out=$(probe CLAUDE_PLUGIN_ROOT=);                assert_eq "$pn|script-path|0.1.1" "$out" "variable empty falls back to the script path"
+out=$(probe CLAUDE_PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'); assert_eq "$pn|script-path|0.1.1" "$out" "literal unexpanded placeholder falls back to the script path"
+out=$(probe CLAUDE_PLUGIN_ROOT=/);               assert_eq "$pn|script-path|0.1.1" "$out" "variable '/' is rejected, never used"
+out=$(probe CLAUDE_PLUGIN_ROOT="$EVAL_TMP");     assert_eq "$pn|script-path|0.1.1" "$out" "variable pointing at a non-plugin dir is rejected"
 
 # Sourced through a relative path with `..` (how hooks and adapter scripts reach it).
 out=$(cd "$P/hooks" && env -u CLAUDE_PLUGIN_ROOT bash -c '. "../scripts/_root.sh"; printf "%s|%s" "$SDLC_PLUGIN_ROOT" "$SDLC_ROOT_SOURCE"')
@@ -25,7 +25,7 @@ assert_eq "$pn" "$out" "absolute source path containing .. resolves to the real 
 # Windows spelling of the same root must normalise to the same value.
 win=$(cd "$P" && pwd -W 2>/dev/null || true)
 if [ -n "$win" ]; then
-  out=$(probe CLAUDE_PLUGIN_ROOT="$win");        assert_eq "$pn|CLAUDE_PLUGIN_ROOT|0.1.0" "$out" "Windows path spelling normalises"
+  out=$(probe CLAUDE_PLUGIN_ROOT="$win");        assert_eq "$pn|CLAUDE_PLUGIN_ROOT|0.1.1" "$out" "Windows path spelling normalises"
 fi
 
 # Cache fallback: copy the shim somewhere that is not a plugin root, point HOME at a fake cache.
