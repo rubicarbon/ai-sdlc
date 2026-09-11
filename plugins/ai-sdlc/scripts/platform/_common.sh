@@ -5,6 +5,8 @@
 # Provides:
 #   out_json <json>            print the result unless dry-run
 #   cli <cmd...>               run a platform CLI command (logged in mock/dry-run)
+#   cli_json <label> <cmd...>  run one whose stdout must be JSON; die on failure
+#   cli_json_try <out> <err> <cmd...>  the same, non-fatal: returns the exit code
 #   md_to_html <file>          Markdown -> HTML (awk, no external tool)
 #   gh_repo                    owner/name for GitHub
 #   az_context                 sets AZ_ORG, AZ_PROJECT, AZ_REPO and AZ_ARGS
@@ -57,6 +59,27 @@ cli_json() {
     sdlc_die 1 "$label returned invalid JSON: ${out:0:120}"
   fi
   printf '%s' "$out"
+}
+
+# cli_json_try <out-var> <err-var> <cmd...>: the non-fatal form of cli_json, for the one case
+# where a failure is a known, recoverable condition (a configured resource that does not exist).
+# Runs in the current shell -- not inside $(...) -- so it can set two variables and return a
+# status instead of dying: 0 with <out-var> holding the JSON, or the CLI's exit code with
+# <err-var> holding its first stderr line. A caller that cannot recognise the failure must
+# still sdlc_die: silently continuing would turn a real error into empty data.
+cli_json_try() {
+  local __ovar="$1" __evar="$2"; shift 2
+  local errf o rc
+  errf=$(sdlc_tmpfile .err)
+  o=$("$@" 2>"$errf"); rc=$?
+  printf -v "$__evar" '%s' "$(head -n1 "$errf" 2>/dev/null)"
+  rm -f "$errf"
+  if [ $rc -eq 0 ] && [ -n "$o" ] && printf '%s' "$o" | jq -e . >/dev/null 2>&1; then
+    printf -v "$__ovar" '%s' "$o"; return 0
+  fi
+  [ $rc -eq 0 ] && { printf -v "$__evar" '%s' "returned invalid JSON: ${o:0:120}"; rc=1; }
+  printf -v "$__ovar" '%s' ''
+  return $rc
 }
 
 # json_list <items...> -> JSON array of the non-empty strings (no items -> [])

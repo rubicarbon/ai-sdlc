@@ -5,11 +5,18 @@
 #
 # Knobs (environment):
 #   SDLC_MOCK_CHECKS=pass|fail|pending|empty|skipped   what `pr checks` reports
-#   SDLC_MOCK_FAIL="<subcommand prefix>"     e.g. "pr list": print an error, exit 1
+#   SDLC_MOCK_FAIL="<subcommand prefix>"     e.g. "api graphql": print an error, exit 1
 #   SDLC_MOCK_MALFORMED="<subcommand prefix>" print "{not json" and exit 0
 #   SDLC_MOCK_EMPTY="<subcommand prefix>"     print [] and exit 0
 #   SDLC_MOCK_GH_NO_DEPS=1                    the dependencies API answers 404
 #   SDLC_MOCK_PR_HEAD_SHA=<40 hex>            headRefOid reported by `pr view`
+#   SDLC_MOCK_GH_NO_WORKFLOW=1                `run list --workflow X` answers the real
+#                                             "HTTP 404: workflow X not found on the
+#                                             default branch" (a workflow that was never
+#                                             rendered), as opposed to a generic failure
+#   SDLC_MOCK_GH_PR_COUNT=<n>                 how many merged PRs the `api graphql` search
+#                                             has in total (default 2); the mock pages
+#                                             through them with first/after like GitHub
 set -u
 S="${SDLC_MOCK_STATE:-${TMPDIR:-/tmp}/ai-sdlc-mock-state}"; mkdir -p "$S"
 [ -n "${SDLC_MOCK_LOG:-}" ] && printf 'gh %s\n' "$*" >>"$SDLC_MOCK_LOG"
@@ -19,7 +26,13 @@ if [ -n "${SDLC_MOCK_FAIL:-}" ] && [[ "$all" == "$SDLC_MOCK_FAIL"* ]]; then
   echo "gh: simulated failure of 'gh $SDLC_MOCK_FAIL' (HTTP 502)" >&2; exit 1
 fi
 if [ -n "${SDLC_MOCK_MALFORMED:-}" ] && [[ "$all" == "$SDLC_MOCK_MALFORMED"* ]]; then echo "{not json"; exit 0; fi
-if [ -n "${SDLC_MOCK_EMPTY:-}" ] && [[ "$all" == "$SDLC_MOCK_EMPTY"* ]]; then echo "[]"; exit 0; fi
+if [ -n "${SDLC_MOCK_EMPTY:-}" ] && [[ "$all" == "$SDLC_MOCK_EMPTY"* ]]; then
+  case "${1:-} ${2:-}" in
+    "api graphql") echo '{"data":{"search":{"issueCount":0,"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}' ;;
+    *) echo "[]" ;;
+  esac
+  exit 0
+fi
 next_id() { local f="$S/$1.counter" n=0; [ -f "$f" ] && n=$(<"$f"); n=$((n+1)); echo "$n" >"$f"; echo "$n"; }
 arg_after() { local k="$1"; shift; while [ $# -gt 0 ]; do if [ "$1" = "$k" ]; then echo "${2:-}"; return; fi; shift; done; }
 has_flag() { local k="$1"; shift; for a in "$@"; do [ "$a" = "$k" ] && return 0; done; return 1; }
@@ -65,9 +78,46 @@ case "${1:-} ${2:-}" in
       skipped) echo '[{"name":"ci","state":"SKIPPED","link":"https://github.com/mock-org/mock-repo/actions/runs/1"},{"name":"lint","state":"SKIPPED","link":"https://github.com/mock-org/mock-repo/actions/runs/2"}]'; exit 0 ;;
       *) echo '[{"name":"ci","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/1"},{"name":"lint","state":"SUCCESS","link":"https://github.com/mock-org/mock-repo/actions/runs/2"}]'; exit 0 ;;
     esac ;;
-  "pr list")
-    echo '[{"number":70,"title":"Add thing","createdAt":"2026-08-01T09:00:00Z","mergedAt":"2026-08-02T12:00:00Z","additions":200,"deletions":20,"changedFiles":6,"author":{"login":"dev-a"},"reviews":[{"submittedAt":"2026-08-01T15:00:00Z","state":"APPROVED"}],"commits":[{"committedDate":"2026-07-31T08:00:00Z"}]},{"number":71,"title":"Revert \"Add thing\"","createdAt":"2026-08-03T09:00:00Z","mergedAt":"2026-08-03T10:00:00Z","additions":20,"deletions":200,"changedFiles":6,"author":{"login":"dev-b"},"reviews":[],"commits":[{"committedDate":"2026-08-03T08:30:00Z"}]}]'; exit 0 ;;
+  "api graphql")
+    # The merged-pull-request search the GitHub metrics adapter runs. Paged like the real
+    # API (first/after) so metrics.maxPrs and the page arithmetic are exercised; the cursor
+    # is the offset. PRs 70 and 71 carry the review, commit and revert shapes the export
+    # reads, and SDLC_MOCK_GH_PR_COUNT adds further ones after them.
+    n=100; after=0
+    for a in "$@"; do case "$a" in n=*) n="${a#n=}" ;; after=*) after="${a#after=}" ;; esac; done
+    [ -n "$after" ] || after=0
+    jq -cn --argjson total "${SDLC_MOCK_GH_PR_COUNT:-2}" --argjson n "$n" --argjson after "$after" '
+      def day($i): (($i % 27) + 1) | tostring | if length < 2 then "0" + . else . end;
+      def pr($i):
+        if $i == 0 then
+          {number:70, title:"Add thing", createdAt:"2026-08-01T09:00:00Z", mergedAt:"2026-08-02T12:00:00Z",
+           additions:200, deletions:20, changedFiles:6, author:{login:"dev-a"},
+           reviews:{nodes:[{submittedAt:"2026-08-01T15:00:00Z"}]},
+           commits:{nodes:[{commit:{committedDate:"2026-07-31T08:00:00Z"}}]}}
+        elif $i == 1 then
+          {number:71, title:"Revert \"Add thing\"", createdAt:"2026-08-03T09:00:00Z", mergedAt:"2026-08-03T10:00:00Z",
+           additions:20, deletions:200, changedFiles:6, author:{login:"dev-b"},
+           reviews:{nodes:[]},
+           commits:{nodes:[{commit:{committedDate:"2026-08-03T08:30:00Z"}}]}}
+        else
+          {number:(70+$i), title:("Add thing " + ($i|tostring)),
+           createdAt:("2026-09-" + day($i) + "T09:00:00Z"), mergedAt:("2026-09-" + day($i) + "T12:00:00Z"),
+           additions:10, deletions:1, changedFiles:2, author:{login:"dev-c"},
+           reviews:{nodes:[{submittedAt:("2026-09-" + day($i) + "T10:00:00Z")}]},
+           commits:{nodes:[{commit:{committedDate:("2026-09-" + day($i) + "T08:00:00Z")}}]}}
+        end;
+      ([range($after; ([$after + $n, $total] | min)) | pr(.)]) as $nodes
+      | (($after + ($nodes|length)) < $total) as $more
+      | {data:{search:{issueCount:$total,
+                       pageInfo:{hasNextPage:$more, endCursor:(if $more then (($after + ($nodes|length))|tostring) else null end)},
+                       nodes:$nodes}}}'
+    exit 0 ;;
   "run list")
+    if [ "${SDLC_MOCK_GH_NO_WORKFLOW:-0}" = "1" ]; then
+      wf=$(arg_after --workflow "$@")
+      echo "HTTP 404: workflow $wf not found on the default branch (https://api.github.com/repos/$REPO/actions/workflows/$wf)" >&2
+      exit 1
+    fi
     echo '[{"databaseId":501,"conclusion":"success","createdAt":"2026-08-02T12:05:00Z","updatedAt":"2026-08-02T12:15:00Z","headSha":"aaa111"},{"databaseId":502,"conclusion":"failure","createdAt":"2026-08-03T10:05:00Z","updatedAt":"2026-08-03T10:09:00Z","headSha":"bbb222"}]'; exit 0 ;;
   "api "*)
     path=""; method="GET"

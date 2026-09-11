@@ -148,7 +148,7 @@ run_platform() {
   if jq -e '(.sources|type=="object") and (.sources.prs=="configured") and (.sources.deployments=="configured") and (.sources.incidents=="configured") and (.sources.reverts|IN("configured","partial")) and (.warnings|type=="array") and all(.warnings[]; type=="string")' "$d/metrics.json" >/dev/null 2>&1; then ok "$p" "metrics file names its sources and warnings"; else bad "$p" "metrics file sources/warnings" "$(jq -c '{sources,warnings}' "$d/metrics.json" 2>/dev/null | head -c 400)"; fi
   # a failing CLI call is an error with no output file, never an empty export
   rm -f "$d/metrics-fail.json"
-  case "$p" in github) failcmd="pr list" ;; *) failcmd="repos pr list" ;; esac
+  case "$p" in github) failcmd="api graphql" ;; *) failcmd="repos pr list" ;; esac
   SDLC_MOCK_FAIL="$failcmd" expect "$p" 1 "metrics_export fails when the PR query fails" -- metrics_export 2026-08-01 2099-12-31 "$d/metrics-fail.json"
   [ ! -e "$d/metrics-fail.json" ] && ok "$p" "metrics_export writes no file on failure" || bad "$p" "metrics_export wrote a file on failure" "$d/metrics-fail.json"
   [[ "$ERR" =~ ai-sdlc:.*failed\ \(exit\ 1\) ]] && ok "$p" "metrics_export failure names the command and exit code" || bad "$p" "metrics_export failure message" "$ERR"

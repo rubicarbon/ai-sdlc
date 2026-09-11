@@ -37,7 +37,9 @@
 # --deploy-production) unless --no-deploy skips the deploy template; a plain re-run without
 # them skips the template and says so in next_steps. The production command (exact string and
 # "<command>*") is always added to environments.prod.deployCommandPatterns so the
-# gate-production hook covers it; on init that list starts with "git push * <default branch>"
+# gate-production hook covers it; github.deployWorkflow and azure.deployPipelineName name the
+# rendered deploy automation and are left empty when none was rendered (the metrics export
+# reads them); on init that list starts with "git push * <default branch>"
 # and nothing else (the hook has no built-in patterns). sdlc.config.json content is never
 # rewritten by --upgrade: patterns an earlier plugin version seeded stay until edited by hand.
 # Review runner (review.runner, default ci): "ci" renders the sdlc-pr-review workflow or pipeline
@@ -189,9 +191,9 @@ else
       cost: {maxTurns: ($mt|tonumber), maxBudgetUsd: ($mb|tonumber), alertThresholdUsd: ($at|tonumber)},
       artifacts: {dir: ".sdlc"},
       metrics: {incidentLabel: "incident", deployEnvironment: "production", maxPrs: 200},
-      github: {requiredChecks: (if $rr == "local" then [] else ["sdlc-pr-review"] end), deployWorkflow: "sdlc-deploy.yml"},
+      github: {requiredChecks: (if $rr == "local" then [] else ["sdlc-pr-review"] end), deployWorkflow: ""},
       reuse: {mattpocockSkills: $reuse} }
-    | if $platform == "azure" or $platform == "both" then .azure = ({organization: $azo, project: $azp, repo: $azr, workItemType: "User Story", requiredReviewers: [], deployPipelineName: "sdlc-deploy"} + (if $rr == "local" then {} else {pipelineName: "sdlc-pr-review"} end)) else . end
+    | if $platform == "azure" or $platform == "both" then .azure = ({organization: $azo, project: $azp, repo: $azr, workItemType: "User Story", requiredReviewers: [], deployPipelineName: ""} + (if $rr == "local" then {} else {pipelineName: "sdlc-pr-review"} end)) else . end
     | if $platform == "none" then del(.github) else . end')
   [ -n "$mp_ver" ] && config=$(jq -c --arg v "$mp_ver" '.reuse.mattpocockSkillsVersion=$v' <<<"$config") && config=$(jq -c 'del(.reuse.mattpocockSkillsVersion)' <<<"$config")
 fi
@@ -246,6 +248,23 @@ if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
     sdlc_die 2 "run.sh: tier 3 renders the deploy workflow, which runs the commands configured in sdlc.config.json (commands.deployStaging, commands.deployProduction) with SDLC_ENVIRONMENT and SDLC_SHA exported. Pass $missing_flags (for example --deploy-production 'bash scripts/deploy.sh production \"\$SDLC_SHA\"'), or --no-deploy to set up tier 3 without deployment automation."
   fi
 fi
+# github.deployWorkflow / azure.deployPipelineName name the deploy automation for
+# `sdlc-platform metrics_export`. Only tier 3 renders it, and --no-deploy renders none, so
+# naming it unconditionally points the metrics export at a workflow that does not exist:
+# on GitHub `gh run list --workflow` then answers 404. The plugin's own names follow what
+# this run rendered; a name the user chose is never touched.
+gh_deploy=0; az_deploy=0
+if [ $render_deploy = 1 ]; then
+  { [ "$platform" = both ] || [ "$primary" = github ]; } && gh_deploy=1
+  { [ "$platform" = both ] || [ "$primary" = azure ]; } && az_deploy=1
+fi
+config=$(jq -c --argjson gh "$gh_deploy" --argjson az "$az_deploy" '
+  def follow($rendered; $key; $own):
+    if $rendered == 1 then (if ($key // "") == "" then $own else $key end)
+    elif ($key // "") == $own then "" else ($key // "") end;
+  (if has("github") then .github.deployWorkflow = follow($gh; .github.deployWorkflow; "sdlc-deploy.yml") else . end)
+  | (if has("azure") then .azure.deployPipelineName = follow($az; .azure.deployPipelineName; "sdlc-deploy") else . end)' <<<"$config")
+
 # Tier 3 renders the verification job and makes it the required status check, so a commands.verify
 # that always succeeds would turn the merge gate green having verified nothing. detect.sh proposes
 # SDLC_VERIFY_PLACEHOLDER when the repository offers no candidate: tiers 0 to 2 may keep it (nothing

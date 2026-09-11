@@ -32,7 +32,7 @@ mkdir -p "$EVAL_TMP/state-github" "$EVAL_TMP/state-azure"
 
 for p in github azure; do
   case "$p" in
-    github) cfg="$GH_CFG"; failcmd="pr list"; label='gh pr list --repo mock-org/mock-repo --state merged'; ci="gh" ;;
+    github) cfg="$GH_CFG"; failcmd="api graphql"; label='gh api graphql <merged pull requests in mock-org/mock-repo>'; ci="gh" ;;
     azure)  cfg="$AZ_CFG"; failcmd="repos pr list"; label='az repos pr list --repository mock-repo --status completed'; ci="az" ;;
   esac
   r="$EVAL_TMP/$p"; mkrepo "$r" "$cfg" old
@@ -108,9 +108,63 @@ assert_eq "2" "$(jq -r '.deployments|length' "$azd/out/dep.json")" "azure: deplo
 ghw="$EVAL_TMP/github-wf"; mkrepo "$ghw" "$GH_CFG_WF" old
 export_ github "$ghw" "$ghw/out/wf.json"
 assert_eq "configured" "$(jq -r .sources.deployments "$ghw/out/wf.json")" "github with deployWorkflow -> configured"
+assert_eq "2" "$(jq -r '.deployments|length' "$ghw/out/wf.json")" "github: deployments from the workflow runs"
 export_ github "$ghw" "$ghw/out/wf-fail.json" SDLC_MOCK_FAIL="run list"
 assert_eq "1" "$RC" "github: a failing workflow run query exits 1"
 assert_no_file "$ghw/out/wf-fail.json" "github: no file when the run query fails"
+
+echo "-- github: a configured deploy workflow that was never rendered"
+# tier 0 / --no-deploy render no sdlc-deploy.yml, so `gh run list --workflow` answers 404.
+# That is a configuration mistake, not an outage: the export falls back to the Deployments
+# API and says so, instead of dying and writing nothing.
+export_ github "$ghw" "$ghw/out/wf-404.json" SDLC_MOCK_GH_NO_WORKFLOW=1
+assert_eq "0" "$RC" "github: a deploy workflow missing from the default branch still exits 0 ($ERR)"
+assert_file "$ghw/out/wf-404.json" "github: the export is written despite the missing workflow"
+assert_match "does not exist on the default branch" "$(jq -c .warnings "$ghw/out/wf-404.json")" "github: the missing workflow is a warning"
+assert_match 'sdlc-deploy.yml' "$(jq -c .warnings "$ghw/out/wf-404.json")" "github: the warning names the configured workflow"
+assert_eq "configured" "$(jq -r .sources.deployments "$ghw/out/wf-404.json")" "github: deployments still come from the Deployments API"
+assert_eq "2" "$(jq -r '.deployments|length' "$ghw/out/wf-404.json")" "github: the Deployments API series is not empty"
+assert_eq "$(jq -c .warnings "$ghw/out/wf-404.json")" "$(printf '%s' "$OUT" | jq -c .warnings)" "github: the summary repeats the warning"
+
+echo "-- github: metrics.maxPrs caps the export"
+# Defect: the GitHub adapter used to hardcode --limit 500 and ignore the documented knob.
+ghm="$EVAL_TMP/github-maxprs"
+mkrepo "$ghm" "$(jq -c '.metrics.maxPrs=3' <<<"$GH_CFG")" old
+export_ github "$ghm" "$ghm/out/cap.json" SDLC_MOCK_GH_PR_COUNT=9
+assert_eq "0" "$RC" "github: capped export exits 0 ($ERR)"
+assert_eq "3" "$(jq -r '.prs|length' "$ghm/out/cap.json")" "github: metrics.maxPrs 3 exports 3 pull requests"
+assert_match 'metrics.maxPrs is 3' "$(jq -c .warnings "$ghm/out/cap.json")" "github: the cap is reported as a coverage warning"
+assert_eq '["78","77","76"]' "$(jq -c '[.prs[].id]' "$ghm/out/cap.json")" "github: the cap keeps the most recently merged pull requests, not the first page"
+mkrepo "$ghm" "$(jq -c '.metrics.maxPrs=7' <<<"$GH_CFG")" old
+export_ github "$ghm" "$ghm/out/cap7.json" SDLC_MOCK_GH_PR_COUNT=9
+assert_eq "7" "$(jq -r '.prs|length' "$ghm/out/cap7.json")" "github: raising metrics.maxPrs to 7 exports 7"
+mkrepo "$ghm" "$(jq -c '.metrics.maxPrs=50' <<<"$GH_CFG")" old
+export_ github "$ghm" "$ghm/out/all.json" SDLC_MOCK_GH_PR_COUNT=9
+assert_eq "9" "$(jq -r '.prs|length' "$ghm/out/all.json")" "github: a cap above the total exports every pull request"
+assert_not_match 'maxPrs' "$(jq -c .warnings "$ghm/out/all.json")" "github: no cap warning when nothing was dropped"
+
+echo "-- github: the export pages the PR query rather than asking for every connection at once"
+# A real GraphQL node-limit rejection cannot be reproduced against the mocks (they answer in
+# bash, not on api.github.com), so this guards the query shape instead: `gh pr list` with
+# author+reviews+commits costs ~10,200 possible nodes per PR and GitHub rejects it above ~49.
+GH_EXPORT=$(grep -v '^[[:space:]]*#' "$P/scripts/platform/github/metrics_export.sh")
+assert_not_match 'gh pr list' "$GH_EXPORT" "github: the adapter no longer runs gh pr list for the PR series"
+assert_match 'reviews\(first: 100\)' "$GH_EXPORT" "github: review timestamps are still requested"
+assert_match 'commits\(first: 100\) \{ nodes \{ commit \{ committedDate' "$GH_EXPORT" "github: commit timestamps are requested without each commit's authors connection"
+assert_not_match 'authors' "$GH_EXPORT" "github: the authors connection that blows the node limit is never requested"
+assert_match 'metrics.maxPrs' "$GH_EXPORT" "github: the adapter reads metrics.maxPrs"
+
+echo "-- github: review latency, lead time and author survive the split query"
+K="$EVAL_TMP/github/out/k.json"
+pr70() { jq -r --arg f "$1" '.prs[] | select(.id=="70") | .[$f]' "$K"; }
+pr71() { jq -r --arg f "$1" '.prs[] | select(.id=="71") | .[$f]' "$K"; }
+assert_eq "2026-08-01T15:00:00Z" "$(pr70 first_review_at)" "github: first_review_at from the reviews connection"
+assert_eq "2026-07-31T08:00:00Z" "$(pr70 first_commit_at)" "github: first_commit_at from the commits connection"
+assert_eq "dev-a" "$(pr70 author)" "github: author.login is kept"
+assert_eq "200" "$(pr70 additions)" "github: PR size is kept"
+assert_eq "null" "$(pr71 first_review_at)" "github: an unreviewed PR has a null first_review_at"
+assert_eq "true" "$(pr71 is_revert)" "github: the revert PR is flagged"
+assert_eq '["71","70"]' "$(jq -c '[.prs[].id]' "$K")" "github: the exported PRs are ordered newest merge first, so metrics.maxPrs is a deterministic cap"
 
 echo "-- azure PR size warning"
 assert_match '2 of 2 pull requests have no local merge commits; size and first_commit_at are null for them' "$(jq -c .warnings "$EVAL_TMP/azure/out/k.json")" "azure: warns how many PRs lack local commits"
