@@ -13,7 +13,9 @@ Set up the SDLC loop in the repository at the working directory. Everything writ
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/init/detect.sh" --repo-dir .
 ```
 
-Read the JSON: `platform`, `repo.owner`/`repo.name`, `azure.*`, `cli.gh`/`cli.az` (present, authenticated, `devopsExtension`), `stack`, `verifyCandidates`, `deployCandidates` (filled only when `scripts/deploy.sh` exists), `mattpocock.installed`/`editable_copies`, `existing.config`. When `existing.config` is true, skip to step 3: run.sh is idempotent and reports the state.
+Read the JSON: `platform`, `repo.owner`/`repo.name`, `azure.*`, `git` (`root`, `hasCommits`), `visibility`, `cli.gh`/`cli.az` (present, authenticated, `devopsExtension`), `stack`, `verifyCandidates`, `deployCandidates` (filled only when `scripts/deploy.sh` exists), `mattpocock.installed`/`editable_copies`, `existing.config`. When `existing.config` is true, skip to step 3: run.sh is idempotent and reports the state.
+
+`git.root` false means this directory is not the root of a git repository and `run.sh` will refuse it. Say so before the interview, not after: ask whether to run `git init -b main` here, run it only on an explicit yes, and otherwise stop. `git.hasCommits` false is fine — a repository with no commits initialises normally, and the default branch comes from `defaultBranch`.
 
 ## 2. Interview
 
@@ -25,7 +27,7 @@ Flags in `$ARGUMENTS` answer their question without asking. `--yes` (or `--non-i
 | Repo identifiers | detected owner/name; for Azure confirm org url, project, repo (run.sh refuses Azure without all three) | `--owner --name`, `--azure-org --azure-project --azure-repo` |
 | Inner loop | if `mattpocock.installed` is false, offer `/plugin install mattpocock-skills`; if `editable_copies` is non-empty, warn that both routes load every skill twice; for Azure say `docs/agents/issue-tracker.md` is ours and their setup should get the answer `Other` | none (informational) |
 | Stack | detected `stack.language`/`packageManager` | none |
-| Verification command | `verifyCandidates[0]`, offer the rest | `--verify "<cmd>"` (also `--format`, `--lint`) |
+| Verification command | `verifyCandidates[0]`, offer the rest. When the only candidate is the placeholder (it just prints a reminder and exits 1), ask for a real command: tier 3 makes this the required status check and `run.sh` exits 2 rather than render a job that verifies nothing | `--verify "<cmd>"` (also `--format`, `--lint`) |
 | Environments and gates | `dev,staging,prod` (also accepted: `development`, `stage`/`preprod`, `production`; stored under the three canonical keys): dev gate none, staging auto, prod human with `deployCommandPatterns` starting as `git push * <default branch>` only. The production gate hook reads that list and nothing else; secrets are covered by the hook defaults and the deny rules written to `.claude/settings.json`, two layers with different reach (see `docs/SECURITY.md`) | `--envs` |
 | Starting tier | 0; tiers render cumulatively, so 3 includes 0 to 2 (0 foundation, 1 artifacts, 2 review policy: branch protection, CODEOWNERS, REVIEW.md, 3 automation) | `--tier 0-3` |
 | Deploy commands | none; ask only for tier 3 with a platform other than `none`. Offer `deployCandidates` when present. The deploy workflow runs these shell commands with `SDLC_ENVIRONMENT` and `SDLC_SHA` exported; the production command is added to `environments.prod.deployCommandPatterns`. Tier 3 requires both commands or `--no-deploy` (run.sh exits 2 otherwise); with `--no-deploy` no deploy workflow is rendered | `--deploy-staging "<cmd>" --deploy-production "<cmd>"` or `--no-deploy` |

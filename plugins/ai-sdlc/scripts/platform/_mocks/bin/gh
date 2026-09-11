@@ -29,7 +29,7 @@ case "${1:-} ${2:-}" in
   "auth status") echo "Logged in to github.com as mock-user"; exit 0 ;;
   "label create") exit 0 ;;
   "repo view")
-    echo '{"nameWithOwner":"mock-org/mock-repo","defaultBranchRef":{"name":"main"}}' | jq -c "${*:$#}" 2>/dev/null || echo '{"nameWithOwner":"mock-org/mock-repo","defaultBranchRef":{"name":"main"}}'
+    echo '{"nameWithOwner":"mock-org/mock-repo","defaultBranchRef":{"name":"main"},"visibility":"PRIVATE","isPrivate":true}' | jq -rc "${*:$#}" 2>/dev/null || echo '{"nameWithOwner":"mock-org/mock-repo","defaultBranchRef":{"name":"main"},"visibility":"PRIVATE","isPrivate":true}'
     exit 0 ;;
   "issue create")
     n=$(next_id issue); title=$(arg_after --title "$@"); body=$(file_content "$(arg_after --body-file "$@")")

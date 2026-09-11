@@ -27,6 +27,10 @@
 # docs/adr) get one status entry each from tier 1: unchanged (exists), missing (absent under
 # --check / --dry-run) or installed (created with a .gitkeep placeholder; a directory without
 # .gitkeep is fine).
+# Tier 3 (any platform): commands.verify must be a real command. detect.sh proposes a placeholder
+# that only prints a reminder and exits 1 when the repository offers no candidate; tier 3 makes
+# the verification job the required status check, so run.sh exits 2 rather than render a check
+# that reports green having verified nothing. Tiers 0 to 2 keep the placeholder harmlessly.
 # Deploy automation (tier 3, platform other than none): the deploy workflow runs
 # commands.deployStaging / commands.deployProduction from sdlc.config.json with SDLC_ENVIRONMENT
 # and SDLC_SHA exported. On init or a re-tier both commands are required (--deploy-staging,
@@ -152,7 +156,10 @@ else
   # (dev, staging, prod); the production gate starts with a push to the default branch only
   IFS=',' read -ra env_list <<<"$envs"
   env_json='{}'
+  # One value feeds both repo.defaultBranch and the production gate pattern: two reads could
+  # disagree, and the schema requires a single non-empty token there.
   default_branch=$(jq -r '.defaultBranch | if . == null or . == "" then "main" else . end' <<<"$detected")
+  case "$default_branch" in *[!A-Za-z0-9._/-]*) default_branch=main ;; esac
   for e in "${env_list[@]}"; do
     e="${e// /}"; [ -n "$e" ] || continue
     case "$e" in
@@ -164,7 +171,7 @@ else
   done
   config=$(jq -cn \
     --arg pv "$SDLC_PLUGIN_VERSION" --arg platform "$platform" --argjson tier "$tier" --arg team "$team" \
-    --arg owner "$owner" --arg name "$name" --arg branch "$(jq -r .defaultBranch <<<"$detected")" \
+    --arg owner "$owner" --arg name "$name" --arg branch "$default_branch" \
     --arg lang "$(jq -r .stack.language <<<"$detected")" --arg pm "$(jq -r .stack.packageManager <<<"$detected")" \
     --arg verify "$verify" --arg fmt "$format_cmd" --arg lint "$lint_cmd" --argjson envs "$env_json" \
     --arg ds "$deploy_staging" --arg dp "$deploy_production" \
@@ -238,6 +245,13 @@ if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
     [ -n "$prod_cmd" ] || missing_flags="${missing_flags:+$missing_flags }--deploy-production CMD"
     sdlc_die 2 "run.sh: tier 3 renders the deploy workflow, which runs the commands configured in sdlc.config.json (commands.deployStaging, commands.deployProduction) with SDLC_ENVIRONMENT and SDLC_SHA exported. Pass $missing_flags (for example --deploy-production 'bash scripts/deploy.sh production \"\$SDLC_SHA\"'), or --no-deploy to set up tier 3 without deployment automation."
   fi
+fi
+# Tier 3 renders the verification job and makes it the required status check, so a commands.verify
+# that always succeeds would turn the merge gate green having verified nothing. detect.sh proposes
+# SDLC_VERIFY_PLACEHOLDER when the repository offers no candidate: tiers 0 to 2 may keep it (nothing
+# runs it), tier 3 may not.
+if [ "$tier" -ge 3 ] && sdlc_verify_is_placeholder "$(jq -r '.commands.verify // ""' <<<"$config")"; then
+  sdlc_die 2 "run.sh: tier 3 makes the verification job the required status check, and commands.verify is still the placeholder that only prints a reminder. Pass --verify \"<cmd>\" (the one command that proves the code works, for example --verify 'npm test'), or set commands.verify in sdlc.config.json first."
 fi
 cfg_tmp=$(sdlc_tmpfile .json); jq . <<<"$config" >"$cfg_tmp"
 bash "$SDLC_PLUGIN_ROOT/scripts/config/validate.sh" "$cfg_tmp" --quiet || { rm -f "$cfg_tmp"; sdlc_die 1 "the configuration would be invalid; see errors above"; }
