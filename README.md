@@ -100,6 +100,7 @@ Formatting, linting and verification are the agent's job after a coherent change
 
 ```
 .claude-plugin/marketplace.json     marketplace "ai-sdlc-kit" (one plugin)
+AGENTS.md                           validation policy for work on this repository
 sdlc.config.schema.json             byte copy of the plugin schema, for editors
 docs/                               ARCHITECTURE, REUSE, ADOPTION, METRICS, SECURITY
 plugins/ai-sdlc/
@@ -118,14 +119,29 @@ plugins/ai-sdlc/
 
 ## Development
 
+`AGENTS.md` carries the validation policy for this repository: quick checks and the focused
+tests for what changed locally, full validation in CI.
+
+Local checks:
+
 ```bash
-bash plugins/ai-sdlc/evals/run.sh                       # every eval case; add a word to filter
-bash plugins/ai-sdlc/scripts/platform/conformance.sh    # both adapters under mocks, diffed
+bash -n plugins/ai-sdlc/scripts/init/run.sh             # syntax, for each shell file touched
+bash plugins/ai-sdlc/evals/run.sh root glob             # eval cases whose file name contains a word
 python -B -m unittest discover -s plugins/ai-sdlc/evals/python   # report.py unit tests
 claude plugin validate . --strict                       # marketplace and plugin manifests
 ```
 
-`.github/workflows/ci.yml` runs the same checks plus shellcheck, a YAML parse of every rendered CI template and actionlint on every push and pull request.
+The whole suites, when you want everything rather than the cases for one change. The unfiltered
+runner takes about fifteen minutes on Windows, because every `jq` call is a separate process:
+
+```bash
+bash plugins/ai-sdlc/evals/run.sh                       # every eval case
+bash plugins/ai-sdlc/scripts/platform/conformance.sh    # both adapters under mocks, diffed
+```
+
+`.github/workflows/ci.yml` runs both suites, the unit tests and manifest validation, plus
+shellcheck, a YAML parse of every rendered CI template and actionlint, on pull requests and on
+pushes to `main`.
 
 Evals are plain bash cases under `plugins/ai-sdlc/evals/cases/`: hooks are fed fixture stdin, adapters run against the mock `gh` and `az` in `scripts/platform/_mocks/bin`, and init runs non-interactively into scratch repos under `.dev/scratch/`. Azure CLI behaviour is therefore mock-verified, not live-verified, in this build; `.dev/VERIFY.md` lists what still needs a real project and how to check it. `shellcheck -S warning` runs in the `sdlc-evals` CI template on ubuntu; run it locally when it is installed.
 
