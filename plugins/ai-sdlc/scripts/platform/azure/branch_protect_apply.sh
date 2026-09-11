@@ -23,8 +23,8 @@ require_az; az_context
 approvals=$(read_config '.review.requiredApprovals' 1)
 reviewers_json=$(config_array '.azure.requiredReviewers')
 pipeline_name=$(review_pipeline_name); runner=$(review_runner)
-tmpl=branch-policies.json; pipeline_var=(--var "AZURE_PIPELINE_NAME=$pipeline_name")
-[ -n "$pipeline_name" ] || { tmpl=branch-policies-local.json; pipeline_var=(); }
+tmpl='branch-policies.json'; pipeline_var=(--var "AZURE_PIPELINE_NAME=$pipeline_name")
+[ -n "$pipeline_name" ] || { tmpl='branch-policies-local.json'; pipeline_var=(); }
 plan=$(bash "$SDLC_PLUGIN_ROOT/scripts/init/render.sh" "$SDLC_PLUGIN_ROOT/templates/azure/$tmpl" \
   --var "REPO_DEFAULT_BRANCH=$branch" --var "REVIEW_REQUIRED_APPROVALS=$approvals" \
   --var "AZURE_REQUIRED_REVIEWERS_JSON=$reviewers_json" "${pipeline_var[@]+"${pipeline_var[@]}"}" \

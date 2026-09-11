@@ -31,6 +31,7 @@
 # SDLC_CLAUDE_BIN names the claude executable.
 set -u
 . "${0%/*}/../scripts/_root.sh" || exit 0
+# shellcheck disable=SC2034 # _hook.sh reads it when the input does not parse
 HOOK_FAIL_OPEN=1
 . "$SDLC_PLUGIN_ROOT/scripts/_hook.sh"
 [ "$HOOK_EVENT" = PostToolUse ] || exit 0
@@ -113,6 +114,7 @@ case "$kind" in
     for opt in repository project org organization; do
       if [[ "$match_seg" =~ (^|[[:space:]])--$opt([[:space:]]+|=)[\"\']?([^\"\'[:space:]]+) ]]; then
         target="${BASH_REMATCH[3]}"; want=""
+        # shellcheck disable=SC2154 # az_repo, az_project and az_org come from the eval above
         case "$opt" in repository) want="$az_repo" ;; project) want="$az_project" ;; org|organization) want="$az_org" ;; esac
         if [ -n "$want" ] && [ "${target,,}" != "${want,,}" ] && [ "${target%/}" != "${want%/}" ]; then
           note "launch-local-review: az repos pr create targets --$opt $target, not $want; no local review launched"; exit 0
@@ -207,7 +209,7 @@ if [ "${auth:-login}" = login ]; then
   while IFS= read -r v; do [ -n "$v" ] && add_unset "$v"; done < <(compgen -e ANTHROPIC_ 2>/dev/null || true)
   add_unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
 fi
-ext=sh; case "${OSTYPE:-}" in darwin*) ext=command ;; esac
+ext='sh'; case "${OSTYPE:-}" in darwin*) ext='command' ;; esac
 script="$review_dir/launch-$launch.$ext"
 {
   printf '#!/usr/bin/env bash\n'

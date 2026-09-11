@@ -103,7 +103,7 @@ case "$cmd" in
     mode=""; key=""; field=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --launch) mode=launch; key="${2:-}"; shift 2 ;; --pr) mode=pr; key="${2:-}"; shift 2 ;;
+        --launch) mode=launch; key="${2:-}"; shift 2 ;; --pr) mode='pr'; key="${2:-}"; shift 2 ;;
         --branch) mode=branch; key="${2:-}"; shift 2 ;; --map) mode=map; key="${2:-}"; shift 2 ;; --all) mode=all; shift ;;
         --field) field="${2:-}"; shift 2 ;;
         *) usage ;;
