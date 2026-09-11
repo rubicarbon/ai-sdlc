@@ -94,6 +94,7 @@ fi
 # and under --no-deploy no deploy workflow is rendered), so it degrades to the Deployments API
 # with a warning. Every other failure -- auth, rate limit, network -- is still fatal.
 from_workflow=0
+runs=''; run_err=''   # cli_json_try assigns these by name
 if [ -n "$deploy_workflow" ]; then
   if cli_json_try runs run_err gh run list --repo "$repo" --workflow "$deploy_workflow" \
       --limit 200 --json databaseId,conclusion,createdAt,updatedAt,headSha; then
