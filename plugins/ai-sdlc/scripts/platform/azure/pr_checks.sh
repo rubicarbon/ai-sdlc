@@ -2,15 +2,17 @@
 # pr_checks (Azure DevOps): branch policy evaluations of a PR as normalised checks.
 # Exit 0 pass, 1 fail, 8 pending. The verdict rules live in _common.sh
 # (pr_checks_result) and are shared with GitHub: the function never passes with zero
-# evaluations, and the build policy for azure.pipelineName must be present and
-# approved (an evaluation named "Build (<pipeline>)" satisfies the required name).
+# evaluations, and the build policy for the required pipeline (review_pipeline_name in
+# _common.sh: azure.pipelineName when set, else sdlc-pr-review for review.runner ci, else
+# none) must be present and approved (an evaluation named "Build (<pipeline>)" satisfies
+# the required name). With review.runner local and no custom pipeline `required` is [].
 set -u
 export SDLC_PLATFORM=azure
 . "${0%/*}/../../_root.sh" || exit 2
 . "$SDLC_PLUGIN_ROOT/scripts/platform/_common.sh"
 id="${1:-}"; [[ "$id" =~ ^[0-9]+$ ]] || usage_die "pr_checks <id>"
 require_az; az_context
-pipeline_name=$(read_config '.azure.pipelineName' 'sdlc-pr-review')
+pipeline_name=$(review_pipeline_name)
 required=$(jq -cn --arg n "$pipeline_name" '[$n | select(length>0)]')
 
 raw=$(cli_json "az repos pr policy list --id $id" az repos pr policy list --id "$id" "${AZ_ARGS[@]}" -o json) || exit $?

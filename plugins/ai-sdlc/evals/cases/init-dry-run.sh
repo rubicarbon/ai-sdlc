@@ -209,4 +209,112 @@ assert_eq "none" "$(jq -r .platform "$none/sdlc.config.json")" "platform none re
 assert_no_file "$none/docs/agents/issue-tracker.md" "platform none: no tracker doc (their local tracker applies)"
 out=$(bash "$RUN" --repo-dir "$none" --tier 9 --yes 2>&1); rc=$?; assert_eq "2" "$rc" "bad tier is a usage error"
 
+
+echo "-- review runner local: tier 3 footprints"
+rl="$EVAL_TMP/runner-local"; new_repo "$rl" https://github.com/mock-org/mock-repo.git
+out=$(bash "$RUN" --repo-dir "$rl" --platform github --tier 3 --yes --no-deploy --review-runner local 2>"$rl.err"); rc=$?
+assert_eq "0" "$rc" "github tier 3 with --review-runner local exits 0 ($(head -c 200 "$rl.err"))"
+assert_no_file "$rl/.github/workflows/sdlc-pr-review.yml" "local: no review workflow rendered"
+assert_no_file "$rl/.github/workflows/sdlc-cost-report.yml" "local: no cost report workflow rendered"
+assert_file "$rl/.github/workflows/sdlc-evals.yml" "local: the evals workflow is still rendered"
+assert_eq "local" "$(jq -r .review.runner "$rl/sdlc.config.json")" "local: review.runner stored"
+assert_eq "[]" "$(jq -c .github.requiredChecks "$rl/sdlc.config.json")" "local: github.requiredChecks is empty"
+steps=$(jq -r '.next_steps | join("\n")' <<<"$out")
+assert_not_match 'ANTHROPIC_API_KEY' "$steps" "local: next steps never mention the API key secret"
+assert_match 'sdlc-review' "$steps" "local: next steps explain the local review"
+assert_match 'production approval rule' "$steps" "local: the production approval step stays"
+out=$(bash "$RUN" --repo-dir "$rl" --yes 2>/dev/null)
+assert_eq "already-initialised" "$(jq -r .result <<<"$out")" "local: re-run is idempotent"
+azl="$EVAL_TMP/runner-local-az"; new_repo "$azl" https://dev.azure.com/mock-org/mock-proj/_git/mock-repo
+out=$(bash "$RUN" --repo-dir "$azl" --platform azure --tier 3 --yes --no-deploy --review-runner local 2>"$azl.err"); rc=$?
+assert_eq "0" "$rc" "azure tier 3 with --review-runner local exits 0 ($(head -c 200 "$azl.err"))"
+assert_no_file "$azl/.azuredevops/pipelines/sdlc-pr-review.yml" "azure local: no review pipeline rendered"
+assert_file "$azl/.azuredevops/pipelines/sdlc-evals.yml" "azure local: evals pipeline rendered"
+assert_eq "null" "$(jq -c '.azure.pipelineName' "$azl/sdlc.config.json")" "azure local: no pipelineName"
+assert_eq "null" "$(jq -c '.policies | map(select(.kind=="build")) | first' "$azl/.azuredevops/branch-policies.json")" "azure local: branch policies carry no build requirement"
+assert_eq "4" "$(jq -r '.policies | length' "$azl/.azuredevops/branch-policies.json")" "azure local: four policies"
+out=$(bash "$RUN" --repo-dir "$EVAL_TMP/bogus-runner" --platform github --tier 1 --yes --review-runner bogus 2>&1); rc=$?
+assert_eq "2" "$rc" "--review-runner bogus is a usage error"
+
+echo "-- migration ci -> local on an initialised tier 3 repo"
+mg="$EVAL_TMP/migrate"; new_repo "$mg" https://github.com/mock-org/mock-repo.git
+bash "$RUN" --repo-dir "$mg" --platform github --tier 3 --yes --no-deploy >/dev/null 2>&1
+( cd "$mg" && git add -A >/dev/null && git commit -q -m sdlc )
+assert_file "$mg/.github/workflows/sdlc-pr-review.yml" "migration: ci repo has the review workflow"
+h_before=$(tree_hash "$mg")
+out=$(bash "$RUN" --repo-dir "$mg" --review-runner local --dry-run --yes 2>/dev/null); rc=$?
+assert_eq "0" "$rc" "migration dry-run exits 0"
+assert_eq "$h_before" "$(tree_hash "$mg")" "migration dry-run writes nothing"
+assert_eq "retire-pending" "$(jq -r '.files[] | select(.path==".github/workflows/sdlc-pr-review.yml") | .status' <<<"$out")" "migration dry-run reports the review workflow as retire-pending"
+assert_no_file "$mg/.sdlc/migrations.json" "migration dry-run writes no migrations file"
+out=$(bash "$RUN" --repo-dir "$mg" --review-runner local --yes 2>"$mg.err"); rc=$?
+assert_eq "0" "$rc" "migration to local exits 0 ($(head -c 200 "$mg.err"))"
+assert_eq "retired" "$(jq -r '.files[] | select(.path==".github/workflows/sdlc-pr-review.yml") | .status' <<<"$out")" "untouched review workflow is retired"
+assert_eq "retired" "$(jq -r '.files[] | select(.path==".github/workflows/sdlc-cost-report.yml") | .status' <<<"$out")" "untouched cost report workflow is retired"
+assert_no_file "$mg/.github/workflows/sdlc-pr-review.yml" "retired review workflow is gone"
+assert_no_file "$mg/.github/workflows/sdlc-cost-report.yml" "retired cost report is gone"
+assert_file "$mg/.github/workflows/sdlc-evals.yml" "evals workflow stays"
+assert_eq "local" "$(jq -r .review.runner "$mg/sdlc.config.json")" "config switched to local"
+assert_eq "[]" "$(jq -c .github.requiredChecks "$mg/sdlc.config.json")" "sdlc-pr-review left github.requiredChecks"
+assert_eq "null" "$(jq -c '.[".github/workflows/sdlc-pr-review.yml"]' "$mg/.sdlc/managed-files.json")" "manifest no longer records the retired file"
+jq -e 'to_entries | all(.[]; (.key | test("^(\\.claude/settings\\.json|[^/]+|.+/.+)$")) and ((.value | type) == "object") and ((.value.template // "") | type == "string"))' "$mg/.sdlc/managed-files.json" >/dev/null && _ok "manifest holds managed paths only (no migration state inside)" || _fail "manifest shape" "$(cat "$mg/.sdlc/managed-files.json")"
+assert_eq "pending" "$(jq -r '.["review-runner"].remote' "$mg/.sdlc/migrations.json")" "migrations.json records the pending remote reconciliation"
+assert_eq "ci local" "$(jq -r '.["review-runner"] | "\(.from) \(.to)"' "$mg/.sdlc/migrations.json")" "migrations.json records from and to"
+# the generic tier>=2 step also prints "sdlc-platform branch_protect_apply main", so the migration
+# step is matched by its own sentence, not by the command it recommends
+steps=$(jq -r '.next_steps | join("\n")' <<<"$out")
+assert_match "is not reconciled on github" "$steps" "next steps name the remote reconciliation"
+assert_match 'never pass with zero checks' "$steps" "next steps warn about zero checks on GitHub"
+assert_not_match 'ANTHROPIC_API_KEY' "$steps" "next steps drop the API key"
+out=$(bash "$RUN" --repo-dir "$mg" --yes 2>/dev/null)
+assert_match "is not reconciled on github" "$(jq -r '.next_steps | join("\n")' <<<"$out")" "the remote step persists on the next plain run while pending"
+assert_eq "0" "$(bash "$RUN" --repo-dir "$mg" --check >/dev/null 2>&1; echo $?)" "--check is clean after the migration"
+jq '.["review-runner"].remote="done"' "$mg/.sdlc/migrations.json" >"$mg/m.json" && mv "$mg/m.json" "$mg/.sdlc/migrations.json"
+out=$(bash "$RUN" --repo-dir "$mg" --yes 2>/dev/null)
+assert_not_match "is not reconciled on github" "$(jq -r '.next_steps | join("\n")' <<<"$out")" "the remote step disappears once reconciled"
+echo "-- migration keeps edited and unrecorded review files"
+me="$EVAL_TMP/migrate-edited"; new_repo "$me" https://github.com/mock-org/mock-repo.git
+bash "$RUN" --repo-dir "$me" --platform github --tier 3 --yes --no-deploy >/dev/null 2>&1
+printf '\n# local tweak\n' >>"$me/.github/workflows/sdlc-pr-review.yml"
+out=$(bash "$RUN" --repo-dir "$me" --review-runner local --yes 2>/dev/null); rc=$?
+assert_eq "0" "$rc" "migration with an edited review workflow exits 0"
+assert_eq "retire-pending" "$(jq -r '.files[] | select(.path==".github/workflows/sdlc-pr-review.yml") | .status' <<<"$out")" "edited review workflow is retire-pending"
+assert_file "$me/.github/workflows/sdlc-pr-review.yml" "edited review workflow is kept"
+assert_match 'Retired review files still present' "$(jq -r '.next_steps | join("\n")' <<<"$out")" "next steps list the kept file"
+assert_eq "1" "$(bash "$RUN" --repo-dir "$me" --check >/dev/null 2>&1; echo $?)" "--check exits 1 while a retired file is still present"
+out=$(bash "$RUN" --repo-dir "$me" --force --yes 2>/dev/null)
+assert_no_file "$me/.github/workflows/sdlc-pr-review.yml" "--force removes the edited review workflow"
+mu="$EVAL_TMP/migrate-unrecorded"; new_repo "$mu" https://github.com/mock-org/mock-repo.git
+bash "$RUN" --repo-dir "$mu" --platform github --tier 3 --yes --no-deploy --review-runner local >/dev/null 2>&1
+mkdir -p "$mu/.github/workflows"; printf 'name: mine\n' >"$mu/.github/workflows/sdlc-pr-review.yml"
+out=$(bash "$RUN" --repo-dir "$mu" --yes 2>/dev/null)
+assert_eq "retire-pending" "$(jq -r '.files[] | select(.path==".github/workflows/sdlc-pr-review.yml") | .status' <<<"$out")" "an unrecorded review workflow is retire-pending, never deleted"
+assert_file "$mu/.github/workflows/sdlc-pr-review.yml" "unrecorded review workflow kept"
+echo "-- migration with --only limits retirement, not the config change"
+mo="$EVAL_TMP/migrate-only"; new_repo "$mo" https://github.com/mock-org/mock-repo.git
+bash "$RUN" --repo-dir "$mo" --platform github --tier 3 --yes --no-deploy >/dev/null 2>&1
+out=$(bash "$RUN" --repo-dir "$mo" --review-runner local --only REVIEW.md --yes 2>/dev/null)
+assert_eq "local" "$(jq -r .review.runner "$mo/sdlc.config.json")" "--only: the config still switches"
+assert_eq "retire-pending" "$(jq -r '.files[] | select(.path==".github/workflows/sdlc-pr-review.yml") | .status' <<<"$out")" "--only: the review workflow is not retired"
+assert_file "$mo/.github/workflows/sdlc-pr-review.yml" "--only: the review workflow stays"
+echo "-- switching back to ci"
+out=$(bash "$RUN" --repo-dir "$mg" --review-runner ci --yes 2>/dev/null); rc=$?
+assert_eq "0" "$rc" "switch back to ci exits 0"
+assert_file "$mg/.github/workflows/sdlc-pr-review.yml" "ci: review workflow rendered again"
+assert_eq '["sdlc-pr-review"]' "$(jq -c .github.requiredChecks "$mg/sdlc.config.json")" "ci: sdlc-pr-review is a required check again"
+assert_match 'ANTHROPIC_API_KEY' "$(jq -r '.next_steps | join("\n")' <<<"$out")" "ci: the API key step is back"
+echo "-- azure migration keeps a custom build requirement, refuses the review pipeline name"
+ma="$EVAL_TMP/migrate-az"; new_repo "$ma" https://dev.azure.com/mock-org/mock-proj/_git/mock-repo
+bash "$RUN" --repo-dir "$ma" --platform azure --tier 3 --yes --no-deploy >/dev/null 2>&1
+jq '.azure.pipelineName="custom-ci"' "$ma/sdlc.config.json" >"$ma/c.json" && mv "$ma/c.json" "$ma/sdlc.config.json"
+out=$(bash "$RUN" --repo-dir "$ma" --review-runner local --yes 2>/dev/null); rc=$?
+assert_eq "0" "$rc" "azure migration with a custom pipeline exits 0"
+assert_eq "custom-ci" "$(jq -r .azure.pipelineName "$ma/sdlc.config.json")" "custom pipelineName is kept"
+assert_eq "custom-ci" "$(jq -r '.policies[] | select(.kind=="build") | .settings.pipelineName' "$ma/.azuredevops/branch-policies.json")" "branch policies keep the custom build requirement"
+assert_no_file "$ma/.azuredevops/pipelines/sdlc-pr-review.yml" "azure migration retires the review pipeline"
+jq '.azure.pipelineName="sdlc-pr-review"' "$ma/sdlc.config.json" >"$ma/c.json" && mv "$ma/c.json" "$ma/sdlc.config.json"
+out=$(bash "$RUN" --repo-dir "$ma" --yes 2>&1); rc=$?
+assert_eq "2" "$rc" "runner local with pipelineName sdlc-pr-review is refused"
+assert_match 'names the review pipeline' "$out" "the refusal explains the conflict"
+
 eval_done

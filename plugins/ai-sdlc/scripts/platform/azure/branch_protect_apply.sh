@@ -7,6 +7,12 @@
 # ("updated"), equal -> "unchanged". Policies of other types, other branches or other
 # repositories are never touched. Azure Repos has no CODEOWNERS; the human gate is the
 # "Required reviewers" policy fed from azure.requiredReviewers in the config.
+# The build policy follows review_pipeline_name (_common.sh): azure.pipelineName when set,
+# sdlc-pr-review for review.runner ci, none for review.runner local. With runner local every
+# existing build policy on the branch whose display name is sdlc-pr-review (the retired review
+# pipeline) is deleted and listed under "removed", independent of a custom pipeline; a custom
+# build policy is never removed. A successful run marks the review-runner migration remote
+# side done in <artifacts>/migrations.json.
 set -u
 export SDLC_PLATFORM=azure
 . "${0%/*}/../../_root.sh" || exit 2
@@ -16,11 +22,13 @@ require_az; az_context
 
 approvals=$(read_config '.review.requiredApprovals' 1)
 reviewers_json=$(config_array '.azure.requiredReviewers')
-pipeline_name=$(read_config '.azure.pipelineName' 'sdlc-pr-review')
-plan=$(bash "$SDLC_PLUGIN_ROOT/scripts/init/render.sh" "$SDLC_PLUGIN_ROOT/templates/azure/branch-policies.json" \
+pipeline_name=$(review_pipeline_name); runner=$(review_runner)
+tmpl='branch-policies.json'; pipeline_var=(--var "AZURE_PIPELINE_NAME=$pipeline_name")
+[ -n "$pipeline_name" ] || { tmpl='branch-policies-local.json'; pipeline_var=(); }
+plan=$(bash "$SDLC_PLUGIN_ROOT/scripts/init/render.sh" "$SDLC_PLUGIN_ROOT/templates/azure/$tmpl" \
   --var "REPO_DEFAULT_BRANCH=$branch" --var "REVIEW_REQUIRED_APPROVALS=$approvals" \
-  --var "AZURE_REQUIRED_REVIEWERS_JSON=$reviewers_json" --var "AZURE_PIPELINE_NAME=$pipeline_name" \
-  ${SDLC_CONFIG:+--config "$SDLC_CONFIG"}) || sdlc_die 1 "could not render branch-policies.json"
+  --var "AZURE_REQUIRED_REVIEWERS_JSON=$reviewers_json" "${pipeline_var[@]+"${pipeline_var[@]}"}" \
+  ${SDLC_CONFIG:+--config "$SDLC_CONFIG"}) || sdlc_die 1 "could not render $tmpl"
 
 repo_json=$(cli_json "az repos show --repository $AZ_REPO" az repos show --repository "$AZ_REPO" "${AZ_ARGS[@]}" -o json) || exit $?
 repo_id=$(printf '%s' "$repo_json" | jq -r '.id // empty')
@@ -80,8 +88,24 @@ managed_eq() {  # managed_eq <kind> <desired-json> <existing-json>
   jq -en --arg k "$1" --argjson w "$2" --argjson c "$3" "$managed"' ($w | managed($k)) == ($c | managed($k))' >/dev/null
 }
 
-applied=(); updated=(); unchanged=(); skipped=()
+applied=(); updated=(); unchanged=(); skipped=(); removed=()
 common=(--blocking true --enabled true --branch "$branch" --repository-id "$repo_id" "${AZ_ARGS[@]}" -o json)
+
+# review.runner local: the review pipeline's build policy is obsolete. Every build policy on
+# this branch (and repository) named sdlc-pr-review goes; any other build policy stays.
+if [ "$runner" = local ]; then
+  while IFS= read -r obs_id; do
+    [ -n "$obs_id" ] || continue
+    cli az repos policy delete --id "$obs_id" --yes "${AZ_ARGS[@]}" >/dev/null \
+      || sdlc_die 1 "az repos policy delete --id $obs_id failed"
+    removed+=("build: sdlc-pr-review (policy $obs_id)")
+  done < <(printf '%s' "$existing" | jq -r --arg ref "refs/heads/$branch" --arg repo "$repo_id" '
+    .[] | select(((.type.id // "") | ascii_downcase) == "0609b952-1397-4640-95ec-e00a01b2c241" or (.type.displayName // "") == "Build")
+        | select((.settings.displayName // "") == "sdlc-pr-review")
+        | select(any((.settings.scope // [])[]; (.refName // "") == $ref
+              and ((.repositoryId // null) == null or ((.repositoryId | tostring | ascii_downcase) == ($repo | ascii_downcase)))))
+        | .id')
+fi
 while IFS= read -r pol; do
   kind=$(printf '%s' "$pol" | jq -r .kind)
   type_of "$kind" || { skipped+=("$kind: unknown policy kind in template"); continue; }
@@ -132,7 +156,9 @@ while IFS= read -r pol; do
   fi
 done < <(printf '%s' "$plan" | jq -c '.policies[]')
 
+migration_remote_done
 out_json "$(jq -cn --arg b "$branch" \
   --argjson a "$(json_list "${applied[@]+"${applied[@]}"}")" --argjson up "$(json_list "${updated[@]+"${updated[@]}"}")" \
   --argjson u "$(json_list "${unchanged[@]+"${unchanged[@]}"}")" --argjson s "$(json_list "${skipped[@]+"${skipped[@]}"}")" \
-  '{branch:$b, applied:$a, updated:$up, unchanged:$u, skipped:$s, platform:"azure"}')"
+  --argjson r "$(json_list "${removed[@]+"${removed[@]}"}")" \
+  '{branch:$b, applied:$a, updated:$up, unchanged:$u, skipped:$s, removed:$r, platform:"azure"}')"

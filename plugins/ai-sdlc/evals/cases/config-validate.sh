@@ -48,6 +48,11 @@ good '.guardrails.protectedPaths=[] | .guardrails.secretPaths=[]' "explicit empt
 good '.environments.prod.deployCommandPatterns=[]' "explicit empty production patterns"
 good 'del(.environments.prod.deployCommandPatterns)' "absent production patterns"
 bad '.commands.verifySetup=1'            'commands.verifySetup: expected string'  'verifySetup type'
+for r in ci local; do good ".review.runner=\"$r\"" "review.runner $r"; done
+for a in login inherit; do good ".review.localAuth=\"$a\"" "review.localAuth $a"; done
+good '.review.localLauncher="wt -d {cwd} bash {script}"' "review.localLauncher"
+bad '.review.runner="cloud"'             'review.runner: must be one of'         'unknown review runner'
+bad '.review.localAuth="key"'            'review.localAuth: must be one of'      'unknown localAuth'
 
 # a freshly generated config validates
 export SDLC_PLATFORM_MOCK=1 HOME="$EVAL_TMP/home"; mkdir -p "$HOME"

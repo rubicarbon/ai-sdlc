@@ -28,7 +28,7 @@ The report follows `ai-sdlc:sdlc-security-review`. Two lines are machine-read by
 Blocking: <n>  Important: <n>  Nit: <n> (cap <cap>)
 ```
 
-A report without a parseable `Blocking: <n>` line, or with two of them, is rejected by the ship gate; it is never read as zero findings. A `**Commit:**` that is not the current `HEAD` is rejected too, so re-run the audit after every new commit.
+A report without a parseable `Blocking: <n>` line, or with two of them, is rejected by the ship gate; it is never read as zero findings. A `**Commit:**` that is not the current `HEAD` is rejected too, so re-run the audit after every new commit. When `/ai-sdlc:sdlc-review` spawns you (review.runner local) it post-processes your report with `scripts/review/assemble.sh`: your title, Commit and summary lines are replaced by one summary that also counts the spec-compliance findings; keep the ranked sections and their bullets exactly in this format.
 
 ## Rules
 

@@ -125,6 +125,34 @@ read_config() {  # read_config <jq path> [default]
   if [ -n "${SDLC_CONFIG:-}" ] && [ -f "$SDLC_CONFIG" ]; then sdlc_config "$1" "${2:-}"; else printf '%s' "${2:-}"; fi
 }
 
+# Two rules for the pull-request review, shared by init, the adapters and pr_checks:
+#   review_runner        -> ci | local (review.runner, default ci). Decides whether the review
+#                           workflow/pipeline (sdlc-pr-review.yml, and sdlc-cost-report.yml on
+#                           GitHub) is rendered, installed and registered at all.
+#   review_pipeline_name -> the Azure build pipeline that pr_checks requires and
+#                           branch_protect_apply enforces as a build policy: azure.pipelineName
+#                           when set (a custom build requirement, whatever the runner), else
+#                           sdlc-pr-review for runner ci, else nothing (empty).
+review_runner() { local r; r=$(read_config '.review.runner' ci); case "$r" in local) printf 'local' ;; *) printf 'ci' ;; esac; }
+review_pipeline_name() {
+  local n; n=$(read_config '.azure.pipelineName' '')
+  if [ -n "$n" ]; then printf '%s' "$n"; elif [ "$(review_runner)" = ci ]; then printf 'sdlc-pr-review'; fi
+}
+# review_is_workflow <file name>: the CI files that belong to the review runner
+review_is_workflow() { case "$1" in sdlc-pr-review.yml|sdlc-cost-report.yml) return 0 ;; *) return 1 ;; esac; }
+
+# migration_remote_done: after branch_protect_apply succeeded for real (not a dry run), record
+# in <artifacts>/migrations.json that the remote side reflects the current review runner.
+migration_remote_done() {
+  [ "${SDLC_DRY_RUN:-0}" = 1 ] && return 0
+  [ -n "${SDLC_PROJECT_DIR:-}" ] || return 0
+  local f; f="$(sdlc_artifacts_dir)/migrations.json"
+  [ -f "$f" ] || return 0
+  jq -e '.["review-runner"].remote == "pending"' "$f" >/dev/null 2>&1 || return 0
+  local tmp; tmp=$(sdlc_tmpfile .json)
+  jq --arg at "$(sdlc_iso_now)" '.["review-runner"].remote = "done" | .["review-runner"].remote_at = $at' "$f" >"$tmp" && mv "$tmp" "$f"
+}
+
 iso_or_null() { if [ -n "${1:-}" ] && [ "$1" != "null" ]; then jq -cn --arg v "$1" '$v'; else printf 'null'; fi; }
 
 md_to_html() { awk -f "$SDLC_PLUGIN_ROOT/scripts/platform/azure/_md2html.awk" "$1"; }

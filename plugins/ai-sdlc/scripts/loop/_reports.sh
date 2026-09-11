@@ -11,7 +11,8 @@
 #   SDLC_REPORT_WARNING  a non-fatal note (security report without a Commit line), also on stderr
 #   SDLC_REPORT_CODE     ok | no-file | empty | wrong-kind | no-verdict | many-verdicts |
 #                        verdict-fail | no-commit | many-commits | commit-mismatch | no-tree |
-#                        many-trees | no-blocking | many-blocking | malformed-blocking
+#                        many-trees | no-blocking | many-blocking | malformed-blocking | stale |
+#                        no-pr
 #   SDLC_REPORT_COMMIT   the sha captured from the Commit line (may be empty)
 #   SDLC_REPORT_TREE     clean | isolated, from the Tree line of a verification report
 #   SDLC_REPORT_BLOCKING the Blocking count of a valid security report
@@ -23,7 +24,15 @@
 #                 disposable worktree of scripts/verify/run-isolated.sh; a run on a dirty
 #                 checkout is not release evidence for HEAD)
 #   security      non-empty, exactly one well-formed "Blocking: <n>" line; when a Commit line is
-#                 present it must match HEAD (absence is allowed; a warning goes to stderr)
+#                 present it must match HEAD (absence is allowed; a warning goes to stderr); a
+#                 "Status: stale" line (written by scripts/review/finalize.sh when the PR head
+#                 moved while the review ran) rejects the report: it is superseded, never zero
+#                 findings
+#   selection     sdlc_select_security_report: with review.runner ci the newest *-security.md
+#                 (today's behaviour); with review.runner local only the report type the local
+#                 review produces counts (*-pr<id>-security.md for the PR, *-local-security.md
+#                 on platform none), a Commit line is required, and without a PR id (from --pr
+#                 or the branch mapping of scripts/review/status.sh) the selection fails closed
 
 # --- selection ---------------------------------------------------------------------------
 
@@ -52,8 +61,9 @@ sdlc__report_scan() {
   local re_tree='^[[:space:]]*\**tree(:\**|\**:)[[:space:]]*\**(clean|isolated)\**([^a-z0-9]|$)'
   local re_block_any='^[[:space:]]*\**blocking\**:'
   local re_block='^[[:space:]]*\**blocking:\**[[:space:]]*([0-9]+)([^0-9]|$)'
+  local re_stale='^[[:space:]]*\**status(:\**|\**:)[[:space:]]*\**stale\**([^a-z0-9]|$)'
   SDLC__R_VERDICTS=0; SDLC__R_VERDICT=""; SDLC__R_COMMITS=0; SDLC_REPORT_COMMIT=""
-  SDLC__R_TREES=0; SDLC_REPORT_TREE=""
+  SDLC__R_TREES=0; SDLC_REPORT_TREE=""; SDLC__R_STALE=0
   SDLC__R_BLOCK_LINES=0; SDLC__R_BLOCK_OK=0; SDLC__R_BLOCKING=""; SDLC__R_BLOCK_TEXT=""
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"; l="${line,,}"
@@ -66,6 +76,7 @@ sdlc__report_scan() {
     if [[ "$l" =~ $re_tree ]]; then
       SDLC__R_TREES=$((SDLC__R_TREES + 1)); SDLC_REPORT_TREE="${BASH_REMATCH[2]}"
     fi
+    if [[ "$l" =~ $re_stale ]]; then SDLC__R_STALE=1; fi
     if [[ "$l" =~ $re_block_any ]]; then
       SDLC__R_BLOCK_LINES=$((SDLC__R_BLOCK_LINES + 1)); SDLC__R_BLOCK_TEXT="$line"
       if [[ "$l" =~ $re_block ]]; then
@@ -141,12 +152,18 @@ sdlc_validate_verify_report() {
   return 0
 }
 
-# sdlc_validate_security_report <file> [head_sha]
+# sdlc_validate_security_report <file> [head_sha] [require-commit]
+# The third argument (non-empty) makes a Commit line mandatory: the local review runner binds
+# every report to the reviewed PR head, so an unbound report is not evidence there.
 sdlc_validate_security_report() {
-  local f="$1" head="${2:-}" name="${1##*/}" what
+  local f="$1" head="${2:-}" require_commit="${3:-}" name="${1##*/}" what
   sdlc__report_basic "$f" || return 1
   what="security report $name"
   sdlc__report_scan "$f"
+  if [ "$SDLC__R_STALE" = 1 ]; then
+    sdlc__report_fail stale "$what was superseded: the pull request head moved while it was being written (Status: stale); it is not evidence for any commit"
+    return 1
+  fi
   case "$SDLC__R_BLOCK_LINES" in
     0) sdlc__report_fail no-blocking \
          "$what has no 'Blocking: <n>' summary line; refusing to read it as zero findings"
@@ -169,6 +186,9 @@ sdlc_validate_security_report() {
         "$what is for commit ${SDLC_REPORT_COMMIT:0:12}, not HEAD ${head:0:12}: re-run the security review"
       return 1
     fi
+  elif [ -n "$require_commit" ]; then
+    sdlc__report_fail no-commit "$what has no 'Commit: <sha>' line; the local review runner requires every security report to be bound to the reviewed commit"
+    return 1
   else
     SDLC_REPORT_WARNING="warning: $what has no Commit line, so it is not bound to HEAD"
     echo "ai-sdlc: $SDLC_REPORT_WARNING" >&2
@@ -198,6 +218,76 @@ sdlc_select_verify_report() {
   for r in "${reports[@]}"; do
     # a redirected function call keeps the side channel (no subshell is involved)
     if sdlc_validate_verify_report "$r" "$head" >/dev/null; then printf '%s\n' "$r"; return 0; fi
+    [ -n "$first" ] || first="$SDLC_REPORT_REASON"
+    [ "$SDLC_REPORT_CODE" = commit-mismatch ] && continue
+    printf '%s\n' "$SDLC_REPORT_REASON"; return 1
+  done
+  SDLC_REPORT_REASON="$first"
+  printf '%s\n' "$first"; return 1
+}
+
+# sdlc_select_security_report <dir> <head_sha> [--pr <id>] [--runner ci|local] [--platform p] [--branch <b>]
+# The security report that decides the ship gate. Prints the chosen file and returns 0, or the
+# reason and returns 1 (SDLC_REPORT_CODE / SDLC_REPORT_REASON set; SDLC_REPORT_BLOCKING and
+# SDLC_REPORT_WARNING carry the chosen report's values).
+#   runner ci (default)         every *-security.md newest first; the first one whose Commit
+#                               (when present) matches HEAD decides (today's behaviour)
+#   runner local, platform none only *-local-security.md, Commit required
+#   runner local, hosted        only *-pr<id>-security.md for the PR; the id comes from --pr,
+#                               else the branch mapping scripts/review/status.sh keeps for
+#                               --branch (default: the current branch of the repository that
+#                               holds <dir>); without an id the selection fails closed (no-pr).
+#                               Commit required. There is no fallback to other report types.
+# In every mode a report bound to another commit is skipped (like sdlc_select_verify_report),
+# and the first candidate that is not skipped decides: a malformed or stale report is red.
+sdlc_select_security_report() {
+  local dir="$1" head="${2:-}"; shift 2
+  local pr="" runner=ci platform="" branch="" r first="" pattern require=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr) pr="${2:-}"; shift 2 ;;
+      --runner) runner="${2:-ci}"; shift 2 ;;
+      --platform) platform="${2:-}"; shift 2 ;;
+      --branch) branch="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  SDLC_REPORT_CODE=ok; SDLC_REPORT_REASON=""; SDLC_REPORT_WARNING=""; SDLC_REPORT_BLOCKING=""
+  if [ "$runner" = local ]; then
+    require=1
+    if [ "$platform" = none ]; then
+      pattern='*-local-security.md'
+    else
+      if [ -z "$pr" ]; then
+        [ -n "$branch" ] || branch=$(git -C "${dir%/*}" branch --show-current 2>/dev/null || true)
+        [ -n "$branch" ] && pr=$(bash "$SDLC_PLUGIN_ROOT/scripts/review/status.sh" get --map "$branch" --field pr 2>/dev/null || true)
+      fi
+      if [ -z "$pr" ]; then
+        SDLC_REPORT_CODE=no-pr
+        SDLC_REPORT_REASON="review.runner is local: the security gate needs the pull request id (pass --pr <id>, or run /ai-sdlc:sdlc-review --pr <id> once so the branch is mapped); no other security report type counts"
+        printf '%s\n' "$SDLC_REPORT_REASON"; return 1
+      fi
+      pattern="*-pr${pr}-security.md"
+    fi
+  else
+    pattern='*-security.md'
+  fi
+  local -a reports=()
+  # shellcheck disable=SC2010 # ls -t keeps recency order, the same rule the verify selection uses
+  while IFS= read -r r; do [ -n "$r" ] && reports+=("$r"); done < <(ls -t "$dir"/$pattern 2>/dev/null || true)
+  if [ ${#reports[@]} -eq 0 ]; then
+    SDLC_REPORT_CODE=no-file
+    if [ "$runner" = local ] && [ "$platform" != none ]; then
+      SDLC_REPORT_REASON="no PR-bound security report ($pattern) under $dir/: wait for the local review of PR $pr to reach state posted, or run /ai-sdlc:sdlc-review --pr $pr"
+    elif [ "$runner" = local ]; then
+      SDLC_REPORT_REASON="no local security report ($pattern) under $dir/: run /ai-sdlc:sdlc-review"
+    else
+      SDLC_REPORT_REASON="no $dir/*-security.md: run /ai-sdlc:sdlc-verify --security"
+    fi
+    printf '%s\n' "$SDLC_REPORT_REASON"; return 1
+  fi
+  for r in "${reports[@]}"; do
+    if sdlc_validate_security_report "$r" "$head" "$require" >/dev/null 2>&1; then printf '%s\n' "$r"; return 0; fi
     [ -n "$first" ] || first="$SDLC_REPORT_REASON"
     [ "$SDLC_REPORT_CODE" = commit-mismatch ] && continue
     printf '%s\n' "$SDLC_REPORT_REASON"; return 1

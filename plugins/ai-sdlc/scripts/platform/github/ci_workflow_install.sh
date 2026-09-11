@@ -33,7 +33,13 @@ place() {  # place <template> <dest-relative>
   { echo "ai-sdlc: $rel differs from the current template (re-run with --force to overwrite):"; diff -u "$dest" "$tmp" | head -n 40; } >&2
   pending+=("$rel"); rm -f "$tmp"
 }
-for t in "$tdir"/workflows/*.yml; do [ -f "$t" ] && place "$t" ".github/workflows/${t##*/}"; done
+runner=$(review_runner)
+for t in "$tdir"/workflows/*.yml; do
+  [ -f "$t" ] || continue
+  # review.runner local: the review workflow and its cost report are not installed
+  [ "$runner" = local ] && review_is_workflow "${t##*/}" && continue
+  place "$t" ".github/workflows/${t##*/}"
+done
 [ -f "$tdir/PULL_REQUEST_TEMPLATE.md" ] && place "$tdir/PULL_REQUEST_TEMPLATE.md" ".github/PULL_REQUEST_TEMPLATE.md"
 [ -f "$tdir/CODEOWNERS.tmpl" ] && place "$tdir/CODEOWNERS.tmpl" ".github/CODEOWNERS"
 

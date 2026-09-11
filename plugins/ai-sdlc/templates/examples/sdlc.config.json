@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/rubicarbon/ai-sdlc/main/sdlc.config.schema.json",
   "version": 1,
-  "pluginVersion": "0.1.1",
+  "pluginVersion": "0.1.2",
   "platform": "azure",
   "tier": 2,
   "repo": {
@@ -34,7 +34,8 @@
   },
   "review": {
     "requiredApprovals": 1,
-    "nitCap": 5
+    "nitCap": 5,
+    "runner": "ci"
   },
   "cost": {
     "maxTurns": 40,
