@@ -38,6 +38,7 @@ assert_eq "npm run verify" "$(jq -r .commands.verify "$gh/sdlc.config.json")" "v
 assert_eq "typescript" "$(jq -r .stack.language "$gh/sdlc.config.json")" "language detected"
 assert_eq "mock-org" "$(jq -r .repo.owner "$gh/sdlc.config.json")" "owner from remote"
 assert_eq "null" "$(jq -c '.guardrails' "$gh/sdlc.config.json")" "init writes no guardrails block (no ticket enforcement at any tier)"
+assert_eq "" "$(jq -r .github.deployWorkflow "$gh/sdlc.config.json")" "tier 1 names no deploy workflow (none is rendered below tier 3; metrics_export would 404 on it)"
 assert_eq '["git push * main"]' "$(jq -c '.environments.prod.deployCommandPatterns' "$gh/sdlc.config.json")" "production gate starts with a push to the default branch only"
 assert_match 'GitHub \(via `sdlc-platform`\)' "$(head -n1 "$gh/docs/agents/issue-tracker.md")" "github tracker doc"
 assert_eq "0" "$(grep -c '{{' "$gh/CLAUDE.md" "$gh/REVIEW.md" "$gh/docs/agents/issue-tracker.md" | awk -F: '{s+=$2} END{print s}')" "no unresolved markers in rendered files"
@@ -120,6 +121,7 @@ out=$(bash "$RUN" --repo-dir "$az" --platform azure --tier 1 --yes 2>"$az.err");
 assert_eq "0" "$rc" "init azure tier 1 exits 0 ($(head -c 300 "$az.err"))"
 assert_match 'Azure DevOps \(via `sdlc-platform`\)' "$(head -n1 "$az/docs/agents/issue-tracker.md")" "azure tracker doc"
 assert_eq "https://dev.azure.com/mock-org" "$(jq -r .azure.organization "$az/sdlc.config.json")" "azure org derived from remote"
+assert_eq "" "$(jq -r .azure.deployPipelineName "$az/sdlc.config.json")" "azure tier 1 names no deploy pipeline"
 assert_eq "mock-proj" "$(jq -r .azure.project "$az/sdlc.config.json")" "azure project derived from remote"
 hz=$(tree_hash "$az")
 out=$(bash "$RUN" --repo-dir "$az" --tier 3 --yes 2>"$az.err3"); rc=$?
@@ -137,6 +139,7 @@ ghrefs=$(grep -rIwn 'gh' "$az" --exclude-dir=.git --exclude-dir=node_modules | g
 assert_eq "" "$ghrefs" "azure footprint has zero references to gh"
 assert_eq "0" "$(grep -rl '{{[A-Z_]*}}' "$az" --exclude-dir=.git | wc -l | tr -d ' ')" "azure: no unresolved markers anywhere"
 assert_eq "null" "$(jq -c '.guardrails' "$az/sdlc.config.json")" "re-tier to 3 adds no guardrails block (tiers never enable ticket enforcement)"
+assert_eq "sdlc-deploy" "$(jq -r .azure.deployPipelineName "$az/sdlc.config.json")" "azure tier 3 with deploy commands names the rendered deploy pipeline"
 
 echo "-- github tier 3 CI footprint"
 gh3="$EVAL_TMP/gh3"; new_repo "$gh3" https://github.com/mock-org/mock-repo.git
@@ -154,6 +157,7 @@ assert_match 'make deploy ENV=production' "$deploy_yml" "rendered deploy workflo
 assert_not_match 'scripts/deploy\.sh' "$deploy_yml" "rendered deploy workflow has no scripts/deploy.sh"
 assert_eq "make deploy ENV=staging" "$(jq -r .commands.deployStaging "$gh3/sdlc.config.json")" "config stores commands.deployStaging"
 assert_eq "make deploy ENV=production" "$(jq -r .commands.deployProduction "$gh3/sdlc.config.json")" "config stores commands.deployProduction"
+assert_eq "sdlc-deploy.yml" "$(jq -r .github.deployWorkflow "$gh3/sdlc.config.json")" "tier 3 with deploy commands names the rendered deploy workflow"
 assert_eq '["git push * main","make deploy ENV=production","make deploy ENV=production*"]' "$(jq -c '.environments.prod.deployCommandPatterns' "$gh3/sdlc.config.json")" "config patterns are the default-branch push plus the production command and its wildcard"
 assert_eq "1" "$(jq '[.environments.prod.deployCommandPatterns[] | select(. == "make deploy ENV=production")] | length' "$gh3/sdlc.config.json")" "pattern added once"
 out=$(bash "$RUN" --repo-dir "$gh3" --yes 2>/dev/null)
@@ -168,6 +172,7 @@ assert_file "$nd/.github/workflows/sdlc-pr-review.yml" "--no-deploy still render
 assert_no_file "$nd/.github/workflows/sdlc-deploy.yml" "--no-deploy renders no deploy workflow"
 assert_match 'Deployment automation was omitted' "$(jq -r '.next_steps | join("\n")' <<<"$out")" "--no-deploy: next_steps say deployment automation was omitted"
 assert_eq "null" "$(jq -c '.commands.deployProduction' "$nd/sdlc.config.json")" "--no-deploy stores no deploy command"
+assert_eq "" "$(jq -r .github.deployWorkflow "$nd/sdlc.config.json")" "--no-deploy names no deploy workflow"
 out=$(bash "$RUN" --repo-dir "$nd" --yes 2>"$nd.err2"); rc=$?
 assert_eq "0" "$rc" "plain re-run at tier 3 without deploy commands exits 0 (no error)"
 assert_no_file "$nd/.github/workflows/sdlc-deploy.yml" "plain re-run skips the deploy template"
@@ -177,6 +182,11 @@ assert_eq "0" "$rc" "re-run with the deploy flags exits 0 ($(head -c 200 "$nd.er
 assert_file "$nd/.github/workflows/sdlc-deploy.yml" "re-run with the deploy flags renders the deploy workflow"
 assert_match 'npm run deploy:prod' "$(cat "$nd/.github/workflows/sdlc-deploy.yml")" "rendered deploy workflow has the later-added command"
 assert_eq "true" "$(jq '.environments.prod.deployCommandPatterns | index("npm run deploy:prod") != null' "$nd/sdlc.config.json")" "later-added production command is gated"
+assert_eq "sdlc-deploy.yml" "$(jq -r .github.deployWorkflow "$nd/sdlc.config.json")" "the re-run that renders the deploy workflow starts naming it"
+# a name the user chose is theirs: the plugin only manages its own sdlc-deploy.yml
+jq -c '.github.deployWorkflow="release.yml"' "$nd/sdlc.config.json" >"$nd/sdlc.config.json.tmp" && mv "$nd/sdlc.config.json.tmp" "$nd/sdlc.config.json"
+bash "$RUN" --repo-dir "$nd" --yes >/dev/null 2>&1
+assert_eq "release.yml" "$(jq -r .github.deployWorkflow "$nd/sdlc.config.json")" "a user-chosen deploy workflow name survives a re-run"
 
 echo "-- environment names are canonicalised"
 envs="$EVAL_TMP/envs"; new_repo "$envs" https://github.com/mock-org/mock-repo.git
