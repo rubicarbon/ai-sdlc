@@ -260,16 +260,18 @@ assert_eq "null" "$(jq -c '.[".github/workflows/sdlc-pr-review.yml"]' "$mg/.sdlc
 jq -e 'to_entries | all(.[]; (.key | test("^(\\.claude/settings\\.json|[^/]+|.+/.+)$")) and ((.value | type) == "object") and ((.value.template // "") | type == "string"))' "$mg/.sdlc/managed-files.json" >/dev/null && _ok "manifest holds managed paths only (no migration state inside)" || _fail "manifest shape" "$(cat "$mg/.sdlc/managed-files.json")"
 assert_eq "pending" "$(jq -r '.["review-runner"].remote' "$mg/.sdlc/migrations.json")" "migrations.json records the pending remote reconciliation"
 assert_eq "ci local" "$(jq -r '.["review-runner"] | "\(.from) \(.to)"' "$mg/.sdlc/migrations.json")" "migrations.json records from and to"
+# the generic tier>=2 step also prints "sdlc-platform branch_protect_apply main", so the migration
+# step is matched by its own sentence, not by the command it recommends
 steps=$(jq -r '.next_steps | join("\n")' <<<"$out")
-assert_match 'branch_protect_apply main' "$steps" "next steps name the remote reconciliation"
+assert_match "is not reconciled on github" "$steps" "next steps name the remote reconciliation"
 assert_match 'never pass with zero checks' "$steps" "next steps warn about zero checks on GitHub"
 assert_not_match 'ANTHROPIC_API_KEY' "$steps" "next steps drop the API key"
 out=$(bash "$RUN" --repo-dir "$mg" --yes 2>/dev/null)
-assert_match 'branch_protect_apply main' "$(jq -r '.next_steps | join("\n")' <<<"$out")" "the remote step persists on the next plain run while pending"
+assert_match "is not reconciled on github" "$(jq -r '.next_steps | join("\n")' <<<"$out")" "the remote step persists on the next plain run while pending"
 assert_eq "0" "$(bash "$RUN" --repo-dir "$mg" --check >/dev/null 2>&1; echo $?)" "--check is clean after the migration"
 jq '.["review-runner"].remote="done"' "$mg/.sdlc/migrations.json" >"$mg/m.json" && mv "$mg/m.json" "$mg/.sdlc/migrations.json"
 out=$(bash "$RUN" --repo-dir "$mg" --yes 2>/dev/null)
-assert_not_match 'branch_protect_apply main' "$(jq -r '.next_steps | join("\n")' <<<"$out")" "the remote step disappears once reconciled"
+assert_not_match "is not reconciled on github" "$(jq -r '.next_steps | join("\n")' <<<"$out")" "the remote step disappears once reconciled"
 echo "-- migration keeps edited and unrecorded review files"
 me="$EVAL_TMP/migrate-edited"; new_repo "$me" https://github.com/mock-org/mock-repo.git
 bash "$RUN" --repo-dir "$me" --platform github --tier 3 --yes --no-deploy >/dev/null 2>&1

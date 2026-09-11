@@ -147,7 +147,8 @@ case "$kind" in
     if [ -n "$newest" ]; then
       nstate=$(jq -r '.state // ""' <<<"$newest"); nsha=$(jq -r '.head_sha // ""' <<<"$newest")
       if ! bash "$STATUS" is_terminal "$nstate" 2>/dev/null && { [ -z "$nsha" ] || [ "$nsha" = "$head" ]; }; then exit 0; fi
-      [ "$nsha" = "$head" ] && bash "$STATUS" is_terminal "$nstate" 2>/dev/null && [ "$nstate" != stale ] && [ "$nstate" != "timeout" ] && [ "$nstate" != abandoned ] && [[ "$nstate" != failed* ]] && exit 0
+      # head_sha is attached by the review itself, so an unattached launch counts for this head too
+      { [ -z "$nsha" ] || [ "$nsha" = "$head" ]; } && bash "$STATUS" is_terminal "$nstate" 2>/dev/null && [ "$nstate" != stale ] && [ "$nstate" != "timeout" ] && [ "$nstate" != abandoned ] && [[ "$nstate" != failed* ]] && exit 0
     fi ;;
 esac
 

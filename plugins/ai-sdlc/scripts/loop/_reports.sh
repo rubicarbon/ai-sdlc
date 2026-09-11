@@ -260,7 +260,7 @@ sdlc_select_security_report() {
     else
       if [ -z "$pr" ]; then
         [ -n "$branch" ] || branch=$(git -C "${dir%/*}" branch --show-current 2>/dev/null || true)
-        [ -n "$branch" ] && pr=$(bash "$SDLC_PLUGIN_ROOT/scripts/review/status.sh" get --branch "$branch" --field pr 2>/dev/null || true)
+        [ -n "$branch" ] && pr=$(bash "$SDLC_PLUGIN_ROOT/scripts/review/status.sh" get --map "$branch" --field pr 2>/dev/null || true)
       fi
       if [ -z "$pr" ]; then
         SDLC_REPORT_CODE=no-pr

@@ -282,8 +282,10 @@ manage() {
     cur_hash=$(sdlc_sha256 "$dest")
     if [ "$cur_hash" = "$new_hash" ]; then add_status "$dest" unchanged "$tmpl"; rm -f "$tmp"; record=1
     elif [ -n "$rec_hash" ] && [ "$cur_hash" = "$rec_hash" ]; then
-      # untouched by the user, but the plugin's template moved on
-      if [ $check = 0 ] && { [ $upgrade = 1 ] || [ $force = 1 ]; } && only_allows "$dest"; then
+      # untouched by the user, but the plugin's template moved on -- or this run changed the
+      # configuration the file is rendered from (a --review-runner switch: the Azure build
+      # requirement follows azure.pipelineName), which the user asked for on this command line
+      if [ $check = 0 ] && { [ $upgrade = 1 ] || [ $force = 1 ] || [ -n "${migration_switch:-}" ]; } && only_allows "$dest"; then
         place "$tmp" "$dest"; add_status "$dest" upgraded "$tmpl"; record=1
       else add_status "$dest" template-changed "$tmpl"; rm -f "$tmp"; fi
     else
@@ -498,7 +500,7 @@ if [ "$tier" -ge 3 ] && [ -n "$primary" ]; then
   steps+=("Commit the CI files, then register them: sdlc-platform ci_workflow_install")
   steps+=("Create the production approval rule (GitHub environment 'production' with required reviewers, or the Azure environment's Approvals check): see docs/PLATFORM-SETUP.md.")
   if [ "$runner" = local ]; then
-    steps+=("Review runner is local: no ANTHROPIC_API_KEY secret is needed. After sdlc-platform pr_create (or gh pr create / az repos pr create) the launch-local-review hook opens a terminal window running /ai-sdlc:sdlc-review --pr <id> with your own Claude login; it reviews the PR head in an isolated worktree, saves $art/verify/<date>-<sha>-pr<id>-security.md and posts it on the PR. Launch state lives under $art/tmp/review/ (scripts/review/status.sh). 'claude' must be on PATH in the terminal that runs Claude Code.")
+    steps+=("Review runner is local: no CI API key secret is needed. After sdlc-platform pr_create (or gh pr create / az repos pr create) the launch-local-review hook opens a terminal window running /ai-sdlc:sdlc-review --pr <id> with your own Claude login; it reviews the PR head in an isolated worktree, saves $art/verify/<date>-<sha>-pr<id>-security.md and posts it on the PR. Launch state lives under $art/tmp/review/ (scripts/review/status.sh). 'claude' must be on PATH in the terminal that runs Claude Code.")
   else
     steps+=("Create the CI secret ANTHROPIC_API_KEY (GitHub repository secret, or the Azure variable group sdlc-secrets): see docs/PLATFORM-SETUP.md sections 2 and 8.")
   fi
