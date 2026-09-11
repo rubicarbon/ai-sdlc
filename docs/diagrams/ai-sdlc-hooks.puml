@@ -1,0 +1,99 @@
+@startuml ai-sdlc-hooks
+title ai-sdlc — the four PreToolUse hooks (exact deny rules)
+skinparam defaultTextAlignment left
+skinparam wrapWidth 300
+
+start
+:tool call intercepted (PreToolUse);
+:hook sources _root.sh then _hook.sh
+exec form ("command":"bash","args":[...]), 10 s timeout;
+if (sdlc.config.json at repo root?) then (no)
+  :exit 0 silently
+  (evals/cases/hooks-silent.sh asserts this);<<#C8E6C9>>
+  stop
+else (yes)
+endif
+
+note right
+  Path lists are read with hook_list:
+  key absent  => built-in defaults
+  key == []   => nothing (home list stays)
+  key == list => replaces the defaults
+  Matching: gitignore-style scripts/_glob.sh
+end note
+
+:== guard-secrets ==
+Read, Glob, Grep, Edit, Write, NotebookEdit, Bash, PowerShell;
+if (path or extracted shell token matches\n.env / .env.* (except .env.example, .env.sample, .env.template, .env.dist),\nsecrets/**, *-key.pem, *.key.pem, privkey.pem, *.key,\nid_rsa, id_ed25519, id_ecdsa, *.p12, *.pfx,\ncredentials.json, service-account*.json,\n~/.ssh ~/.aws ~/.azure ~/.config/gh ~/.kube/config ~/.netrc ~/.npmrc ~/.docker/config.json\nOR a read-or-copy command mentioning GITHUB_TOKEN= GH_TOKEN=\nAZURE_DEVOPS_EXT_PAT= AWS_SHARED_CREDENTIALS_FILE .netrc\nor a whole private key name?) then (yes)
+  :exit 2 — deny, reason on stderr naming the fix;<<#FFCDD2>>
+  stop
+else (no)
+endif
+note right
+  guardrails.secretPaths replaces the project
+  defaults and is applied literally (no exemption);
+  [] leaves only the home list.
+  cert.pem, fullchain.pem, *.crt and *.pub are
+  not secrets — readable.
+  .claude/settings.json deny rules carry the
+  same names as a second layer.
+end note
+
+:== guard-protected-paths ==
+Edit, Write, NotebookEdit, Bash, PowerShell;
+if (modifies .sdlc/UNLOCK_PROTECTED or .sdlc/release/** ?) then (yes)
+  :exit 2 — always denied, the markers never unlock themselves,
+  so the agent can neither create the unlock marker nor write
+  a release authorisation;<<#FFCDD2>>
+  stop
+else (no)
+endif
+if (modifies a path in guardrails.protectedPaths\n(nothing by default)?) then (yes)
+  if (.sdlc/UNLOCK_PROTECTED exists (human-written)?) then (yes)
+    :allow this one edit;
+  else (no)
+    :exit 2 — deny, reads stay allowed;<<#FFCDD2>>
+    stop
+  endif
+else (no)
+endif
+
+:== guard-verifier-readonly ==
+Edit, Write, NotebookEdit;
+if (agent_type is sdlc-verifier or sdlc-security-auditor\n(with or without a plugin prefix)?) then (yes)
+  :exit 2 — every file edit denied. Their shell is NOT restricted,
+  report-don't-fix lives in the agent prompt, and a PASS must
+  state the verified tree;<<#FFCDD2>>
+  stop
+else (no)
+endif
+
+:== gate-production ==
+Bash, PowerShell;
+if (command matches environments.prod.deployCommandPatterns?\nglobs anchored on shell separators, no built-in patterns —\ninit seeds "git push * <default branch>" plus\ncommands.deployProduction (exact and <cmd>*)) then (no match / empty list)
+  :nothing gated;
+else (match)
+  :read .sdlc/release/AUTHORIZED-<HEAD sha>,
+  validate with scripts/ship/_authz.sh;
+  if (authorised_by=, authorised_at=, expires= (digits, strictly future)\nand commit= (full sha == HEAD == file name),\neach present exactly once?) then (no)
+    :exit 2 — deny with the specific reason,
+    message: run /ai-sdlc:sdlc-ship;<<#FFCDD2>>
+    stop
+  else (yes)
+    :allow this command until the marker expires;
+  endif
+endif
+
+:exit 0 — the tool call proceeds;<<#C8E6C9>>
+note right
+  Not gated: source, tests, lockfiles, CI files,
+  sdlc.config.json, .claude/settings.json, installs,
+  scripts, staging deploys. Format, lint and verify are
+  the agent's job after a coherent change, not a hook.
+  No shell classifier: path-like tokens plus a broad
+  "can this write" regex (hook_cmd_writes) plus the
+  configured globs, so `npm test && git push origin main`
+  is still caught.
+end note
+stop
+@enduml

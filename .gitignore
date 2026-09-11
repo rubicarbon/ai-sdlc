@@ -5,3 +5,6 @@
 # Python bytecode (never part of the plugin package)
 __pycache__/
 *.py[cod]
+
+# rendered PlantUML exports (docs/diagrams/*.puml is the source)
+docs/diagrams/out/

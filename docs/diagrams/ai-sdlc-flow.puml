@@ -1,0 +1,219 @@
+@startuml ai-sdlc-flow
+title ai-sdlc — outer delivery loop, exact behaviours
+skinparam ConditionEndStyle hline
+skinparam defaultTextAlignment left
+skinparam wrapWidth 260
+
+|#F5F5F5|Human|
+|#EAF3FF|Agent|
+|#FFF3E0|Deterministic|
+
+|Human|
+start
+:/plugin marketplace add rubicarbon/ai-sdlc
+/plugin install ai-sdlc@ai-sdlc-kit
+/plugin install mattpocock-skills;
+:/ai-sdlc:sdlc-init;
+
+|Deterministic|
+:scripts/init/detect.sh
+platform from git remote, CLI presence + login,
+stack, verify-command candidates,
+mattpocock-skills installed?;
+
+|Agent|
+:ask only what detection could not settle
+platform / tier / team.mode /
+commands.verify|format|lint /
+environments / cost caps (tier 3);
+
+|Deterministic|
+if (sdlc.config.json present and project finished?) then (yes)
+  :report "already-initialised";
+  stop
+else (no)
+endif
+:validate answers against sdlc.config.schema.json (jq only)
+write sdlc.config.json;
+:scripts/init/run.sh --tier N — rendering is cumulative
+double-brace MARKER substitution only, render.sh refuses
+any unresolved marker, every file recorded by hash in
+.sdlc/managed-files.json (upgrade can tell an unchanged
+file from a changed template from a user edit,
+user-edited files never overwritten without --force);
+:tier 0 Foundation
+CLAUDE.md managed block (or AGENTS.md), CONTEXT.md seed,
+docs/agents/domain.md, .claude/settings.json deny rules (merged,
+never clobbered), .gitignore markers;
+:tier 1 Artifacts
+REVIEW.md, docs/agents/issue-tracker.md (github|azure),
+.sdlc/ tree, docs/adr/;
+:tier 2 Review policy
+no new files — next_steps: sdlc-platform branch_protect_apply <default-branch>;
+:tier 3 Automation
+CI templates (.github/workflows/sdlc-*.yml |
+.azuredevops/pipelines/sdlc-*.yml), PR template,
+CODEOWNERS (GitHub) / azure.requiredReviewers, cost caps,
+next_steps: sdlc-platform ci_workflow_install;
+note right
+  sdlc.config.json now exists =>
+  all four hooks become active.
+  Tiers never turn hooks on or off.
+end note
+
+|Human|
+:/ai-sdlc:sdlc-metrics-baseline — at tier 0
+baseline.sh refuses once tier 1 artifacts exist
+(--force overrides and records that fact);
+
+|Agent|
+repeat
+:ai-sdlc:sdlc-loop  /  /ai-sdlc:sdlc-status
+names the next stage from artifacts, never from memory;
+|Deterministic|
+:scripts/loop/precondition.sh <spec|tickets|build|verify|ship>
+exit 0 = may start
+exit 2 = missing artifact + the command that produces it
+exit 1 = error;
+
+|Agent|
+:1. Frame — /ai-sdlc:sdlc-start <one line>
+calls mattpocock-skills:grilling + domain-modeling
+commits CONTEXT.md terms, docs/adr/*;
+
+|Human|
+:2. Spec — type /mattpocock-skills:to-spec
+user-invoked upstream skill: the agent can only tell you
+what to type => <feature>/spec.md;
+:3. Tickets — type /mattpocock-skills:to-tickets
+=> issues/NN-*.md with "Blocked by:" edges
+and "Status: ready-for-agent";
+
+|Agent|
+if (platform == none?) then (yes)
+else (github | azure)
+  :4. Publish — /ai-sdlc:sdlc-publish <feature-dir>
+  scripts/publish/publish.sh via sdlc-platform
+  work_item_create / work_item_link / work_item_comment
+  tracker ids written back as first-line markers
+  + publish-manifest.json;
+endif
+
+|Deterministic|
+:precondition.sh build requires
+a feature dir, >=1 issues/NN-*.md,
+>=1 ticket "Status: ready-for-agent",
+publish-manifest.json when platform != none;
+
+|Human|
+:5. Build — branch named for the ticket,
+type /mattpocock-skills:implement (drives tdd);
+|Agent|
+:run commands.format, commands.lint, commands.verify
+before finishing — the agent's job after a coherent change,
+not a per-edit hook, commits reference the ticket id;
+:6. Review — mattpocock-skills:code-review
+review notes on the PR or ticket;
+
+|Human|
+:7. /ai-sdlc:sdlc-verify [--security];
+|Agent|
+:spawn sdlc-verifier in a fresh context
+tools: Read, Grep, Glob, Bash — model: inherit
+guard-verifier-readonly denies its file edits;
+|Deterministic|
+if (git status --porcelain clean?) then (clean)
+  :run commands.verify on HEAD
+  write "**Tree:** clean";
+else (dirty)
+  :scripts/verify/run-isolated.sh
+  detached worktree of HEAD (or --ref) under <artifacts>/tmp/,
+  commands.verifySetup then commands.verify inside it,
+  worktree removed, fingerprint of the main checkout compared
+  before/after (HEAD, git ls-files -s, git diff HEAD,
+  hash of every untracked non-ignored file)
+  exit 0 pass | 1 fail | 2 usage/env | 4 main checkout changed
+  write "**Tree:** isolated" — or stop and ask for a commit;
+endif
+:report stored verbatim as .sdlc/verify/<date>-<sha>.md
+exactly one **Verdict:**, one **Commit:** == HEAD, one **Tree:**
+PASS requires every acceptance criterion Pass with observable
+evidence (test name + output line, or file:line) and exit 0;
+note right
+  A single "Not verified" = FAIL.
+  scripts/loop/_reports.sh rejects a PASS
+  without exactly one valid Tree line, so a
+  working-tree run is never release evidence.
+end note
+
+|Agent|
+:8. Security — sdlc-security-auditor over the diff,
+sdlc-security-review check list per changed file,
+ranked per REVIEW.md => .sdlc/verify/<date>-<sha>-security.md;
+:9. PR — sdlc-platform pr_create;
+|Human|
+:a human code owner approves
+(CI agent review comments only — never approves,
+never requests changes, branch protection requires
+code-owner review, review.requiredApprovals,
+stale-review dismissal, no force pushes);
+
+:10. /ai-sdlc:sdlc-ship <pr-id> [--version <tag>];
+|Deterministic|
+:scripts/ship/preflight.sh --pr <id> — read-only, exit 0 = all green
+gate 1 newest verify report bound to HEAD is a valid PASS
+gate 2 newest *-security.md parses and Blocking == 0
+gate 3 working tree clean
+gate 4 pr_get review_decision == approved
+gate 5 pr_checks exit 0
+gate 6 .sdlc/release/AUTHORIZED-<HEAD sha> valid;
+if (ready?) then (false)
+  |Agent|
+  :print every gate with ok:false plus its evidence and the
+  command that fixes it, then stop — gate 6 is expected to
+  fail on the first run;
+  |Human|
+  :run at your OWN terminal:
+  scripts/ship/authorize.sh --sha <HEAD sha> --ttl-minutes 120
+  refuses to run when CLAUDECODE, CLAUDE_CODE_ENTRYPOINT
+  or CLAUDE_PROJECT_DIR is set;
+  |Deterministic|
+  :marker validated by scripts/ship/_authz.sh —
+  authorised_by=, authorised_at=, expires= (digits, strictly
+  in the future), commit= (full sha == HEAD == file name),
+  each exactly once, same validator backs gate 6 and the
+  gate-production hook, so they cannot disagree;
+  |Agent|
+  :re-run preflight, continue only when ready is true;
+else (true)
+endif
+:render .sdlc/releases/<version>.md from
+templates/artifacts/release.md.tmpl, one --var per marker,
+rollback rehearsal walked with the human,
+"not rehearsed" written when it was not performed,
+never invented;
+:run commands.deployProduction with
+SDLC_ENVIRONMENT=production and SDLC_SHA=<HEAD sha> exported
+(key unset => stop and ask the human, never guess);
+|Deterministic|
+:gate-production allows it — marker complete, bound to HEAD,
+unexpired, platform side adds its own human gate
+(GitHub production environment reviewers / Azure Approvals);
+|Agent|
+:update RELEASE_AUTHORISED_BY and RELEASE_WATCH,
+tell the user to commit the release note and tag the release;
+
+|Human|
+:11. Learn — /ai-sdlc:sdlc-postmortem,
+/ai-sdlc:sdlc-metrics-report;
+|Deterministic|
+:scripts/metrics/collect.sh via sdlc-platform metrics_export,
+scripts/metrics/report.py renders the four DORA keys plus
+counterweights (revert rate, PR size, review latency, code churn,
+defect escape rate, cost per merged PR from scripts/cost/report.sh)
+with the sample size next to every number
+(on Azure, PR size is null unless computed from local git);
+|Agent|
+repeat while (another ticket or feature?) is (yes) not (no)
+stop
+@enduml
